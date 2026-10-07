@@ -1,128 +1,77 @@
-# lpx-explorer — setup + tracer task list
+# Port status (Tauri → SwiftUI)
 
-Work this list top to bottom. Don't skip ahead. Mark items `- [x]` as you go and commit after each meaningful step. Read `BRIEF.md` first if you haven't.
+`bd` is not installed here; track work in this file until it is.
 
-## 0. Read context
+## Done
+- [x] Package skeleton, `LpxCore` / `LpxExplorer` / `lpx-scan`
+- [x] `AUFinder.findAUs` — standard 4CC triples (aumu/aufx/aumf/aumi) with printable-ASCII noise filter
+- [x] `MetadataParser` (MetaData.plist)
+- [x] `LogicxDiscovery`, `ProjectParser` (+ read-only SHA-256 invariant), bundle stats
+- [x] `LibraryScanner` — bounded parallel pool (70% cores), cache validation, failure isolation
+- [x] `ParseCacheStore`, `AuvalParser` (+ `AuRegistry` running `auval -l`)
+- [x] `SearchMatcher` — project name + plug-in names (+ track names once parsed)
+- [x] App: folder sidebar, project list, inspector (metadata, plug-ins by kind), scan banner, drag-and-drop, Reveal / Open in Logic
+- [x] Measured: 1500 synthetic 600 KB bundles scan in ~1.4 s (1 worker) → ~0.24 s (8 workers)
 
-- [x] Read `/Users/rhyd/code/flowcus-v2/CLAUDE.md` in full (the development discipline you'll follow).
-- [x] Read `/Users/rhyd/code/lpx-toolkit/CLAUDE.md` in full (the format-parsing knowledge you'll port).
-- [x] Skim `/Users/rhyd/code/lpx-toolkit/lpx_inspect.py:706-731` for `find_aus` — that's the function you're porting first.
-- [x] Read `BRIEF.md` in this directory in full.
+- [x] `AppleStock`, `AppleDrummer`, `Regions`, `TrackRegistry`, `TrackFinder`, `TrackPipeline` — ported; **golden tests match the Rust parser exactly** on all 24 `example_projects` (12,677 channel strips, 2,152 AU refs, every registry/region record)
+- [x] Search matches track names (inspector Tracks section with "Show routing" toggle, like the original)
+- [x] Scan optimised with memchr jumps: ~6.4 → ~1.1 ms/MB of ProjectData; 24 projects / 944 MB: 1.14 s on 1 worker, 0.13 s on 14
+- [x] Summary stores only active user-visible tracks (+ routing strips with inserts): cache 66 → 26 KB/project
 
-## 1. Project initialisation
+- [x] Alternatives: manifest parser, per-variant parse (`ProjectParser.parse(bundle:variant:)`), "N alts" badge, variant picker in the inspector (parsed on demand), alternative names searchable
+- [x] Inspector: window screenshot, "Saved with Logic Pro …", missing-`ProjectInformation.plist` warning
+- [x] Audio inventory (`AudioInventory`): bounces / recordings / freeze files under root, `Media/` and every alternative; durations via AVFoundation; smart "hero" pick; in-app player (play/pause/scrub) and Reveal in Finder
+  - NB: `example_projects/` contains **no audio files and only variant 000**, so these are covered by synthetic-bundle unit tests (incl. real generated WAVs) — not by golden data. Worth verifying by hand on a project that has bounces and multiple alternatives.
+  - Differs from the Rust app on purpose: CAF counts as previewable (AVFoundation plays it; the old limit was WebKit's).
 
-- [x] `cd /Users/rhyd/code/lpx-explorer`
-- [x] `git init`
-- [x] Add a sensible `.gitignore` (Tauri standard: `target/`, `node_modules/`, `dist/`, `.DS_Store`, `*.log`, `src-tauri/gen/`, build artefacts).
-- [x] `git add BRIEF.md TASKS.md .gitignore && git commit -m "Initial brief + task list"`
-- [ ] Create the GitHub repo (private or public — ask Rhyd if unsure). Set the SSH remote: `git remote add origin git@github.com:rhydlewis/lpx-explorer.git`. Push the initial commit.  *(deferred — pending visibility confirmation)*
+- [x] Compatibility verdict (`CompatibilityVerdict`): clean / N missing / will-not-open / unknown, shown as a band atop the inspector with a "Show what's missing" list (names + which tracks use each); warning marker on project rows
+  - Deliberate change from the Rust app: counts **unique** plug-ins, not instances.
+- [x] Similarity filters (`SimilarityAxis`, `LibraryFilter`): click Key / Tempo / "Find similar" in the inspector → filter chip over the project list; "Missing plug-ins only" toggle
+- [x] ~~Investigate possible false "missing" plug-ins~~ **Fixed.** Cause: type tags occurring by chance inside base64/plist text blobs in ProjectData. `AUFinder` now rejects a candidate when the 8 bytes before the manufacturer and the 8 bytes after the subtype are all text. Evidence on `example_projects`: 114/114 false hits were text-surrounded, 0/1,439 real (installed) ones were; all 24 projects now say "Opens cleanly". Golden tests encode this (Swift = Rust minus text-blob hits; no installed plug-in is ever removed). Original note:: on `example_projects`, 49 unique plug-ins flagged missing on this Mac, 22 of them in a single project, several with noise-like 4CCs (e.g. `aumu/+WZw/Rik/`). The Rust parser reports the same fingerprints (golden-verified), so this is inherited behaviour. Needs ground truth: which of these projects really complain about missing plug-ins in Logic?
+- [ ] Key pivot is useless when the key was never set (Logic stores C major by default; all 24 examples say C major). Consider hiding the key pivot / treating default key as unknown.
 
-## 2. Scaffold the Tauri app
+- [x] Plug-in rail: sidebar "Plug-ins" view — library-wide usage (projects / instances), install status, category facets + "M of N categorised", status filter, search by name or fingerprint, detail pane listing projects (click to jump), Search the Web / Copy Name
+  - `aumf` ("music effect", e.g. FabFilter Pro-Q 3) is now an **audio** effect in categories and the inspector grouping; the legacy app called it a MIDI effect. `Track.midiFx` still holds aumf+aumi (parser parity) — group by `typeCode` when presenting.
+  - 20 of 63 plug-ins in the examples are "Uncategorised" (third-party names; the table only knows Apple stock plug-ins). **Decision: no keyword/heuristic categorisation** — the owner knows their plug-ins.
+- [ ] Per-project rail scope (the legacy rail also filtered the current project's plug-ins); only the library-wide view exists
 
-- [x] Run `npm create tauri-app@latest .` inside this directory. Choose: TypeScript, React, Vite. (Tauri 2, not v1.)
-- [x] Verify the scaffold builds with `npm install && npm run tauri:dev` — make sure the default Tauri window opens before going further.  *(`cargo check` + `npm install` clean; full `tauri:dev` deferred to manual smoke at 7.6)*
-- [x] Pin Rust toolchain to `>= 1.88` in `rust-toolchain.toml` (matches flowcus-v2).
-- [x] Commit: `Scaffold Tauri 2 + React 19 + TypeScript via create-tauri-app`.
+- [x] **SQLite cache** replaces the JSON file (`SummaryDatabase`): list entries in the background at launch (~0.3 s / 3,000 projects vs 2.2 s blocking), change detection from stamps only (4 ms), incremental saves (50 projects: 68 ms vs ~3 s), full summary loaded on selection (~2 ms). Also fixed: per-refresh list sort (512 ms → cached), plug-in rollup O(n²) (500 → 33 ms), search (159 → 4 ms per keystroke at 3,000 projects).
+- [x] **Local-only**: no Sparkle/network anywhere in the Swift app (`NoNetworkTests`); "Search the Web" removed; legacy Sparkle framework, signing tools, appcast/release scripts and workflow deleted (`legacy-tauri/README-LEGACY.md`)
+- [x] Reveal in Finder replaces "Open in Logic" in the inspector toolbar; right-click a project (or use the toolbar) → Reveal in Finder / Copy Path
 
-## 3. Bring tooling parity with flowcus-v2
+- [ ] **Arrangement track numbers (Logic's "1, 2, 3 … 43" order) — NOT recoverable yet.** Investigated 2026-10-07 using the ground truth in each project's `WindowImage.jpg` (e.g. *To The Mountains v01*: CUE=1, DX=2, FX=3, MX=4, SYNTHS=13, AQU…theremin=14, GTR=17, AQU…lyre=18, SYNTHS MALLETS=42, Vibra=43; numbers count hidden tracks inside collapsed folders). Ruled out:
+  - byte order of channel strips (Audio first, then Inst…) and of registry records (storage order: audio/instrument interleaved, strip ids jump);
+  - `DisplayState.plist` / `DisplayStateArchive` (window/mixer UI state only);
+  - `track_id` (object IDs; stride 64 per created track, not arrangement order), the registry trailer fields (strip id, then a small index that doesn't match track numbers), channel-strip descriptor bytes (flags), and `karT` records (MIDI environment objects such as "Logic Pro Virtual In").
+  - No sequence of track IDs appears adjacent in the file, so the order is not a plain ID list.
+  Findings worth keeping: the registry whitelist misses many record types (the 2-byte "signature" is really an object-class number: 0x1199 `Vibra`/`Click`, 0x119c Aux, 0x11eb/0x10c7/0x11f4 audio variants…); folders like CUE/SYNTHS/GTR are not in the parsed registry at all. A real answer needs deeper reverse-engineering of the arrangement object graph (use the 24 screenshots as test oracle).
+  Fallbacks that *are* possible: sort tracks by name/kind; show the screenshot (already shown).
+  - **Round 2 (owner clarified: hidden tracks are numbered like all others and are *not* inside folders).** Still not found. Checked on *To The Mountains v01* (10.7 MB): (a) no 1/2/4-byte field within ±160 bytes of any registry-shaped record equals, is one off, or increases in the order of the real numbers DX=2, FX=3, MX=4, theremin=14, lyre=18, Vibra=43; (b) the registry-shaped records are NOT in track-number order in the file (FX, MX, then DX, then Vibra, theremin, lyre); (c) `qSxT` (45 records at the very end of the file, ~140 B apart) are marker/text events (names like CUE, PIANO, SYNTHS, STR, CHOIR); `qeSM`/`qSvE` pairs are region/sequence records (names repeat ~8× each); (d) other tags with counts near 43 (`QAkg`, `XAPq`, `HnCA`) are base64 text noise; (e) the 64 registry-shaped records in the 8.7–9.0 MB area include system objects (Master, Click, Stereo Out), 7 Aux, many audio/instrument tracks — signature = object class, not a constant.
+  - **Round 3 (owner provided full ground truth, 2026-10-07):** *To The Mountains v01* was re-saved with one region named `TRACK n` on each of its 46 tracks (n = Logic's sequential track number; hidden tracks count; folders are ordinary "banner" tracks and contain nothing; track 46 is hidden). Full list in the owner's screenshot: 1 CUE, 2 DX, 3 FX, 4 MX, 5 EP 11…, 6–9 Audio 6–9, 10 PIANO, 11 accordian, 12 Tranquil…, 13 SYNTHS, 14 theremin, 15 HARP, 16 Harp 1, 17 GTR, 18 lyre, 19 WOODS, 20 flute, 21 clarinet, 22 bass clarinet, 23 ocarina, 24 BRASS, 25 cornet, 26 SOLO STR, 27/28 Strings Tk#01/#02, 29 STR, 30 ALB5…, 31 BH Harmonics, 32 Strings Tk#01, 33 Audio 33, 34/35 Tk#04/#05, 36 Audio 34, 37 CHOIR, 38 NOVELLA…, 39–41 Choir Tk#02/05/08, 42 SYNTH…LLETS, 43 Vibra, 44 Vibra, 45 MALLETS, 46 AQU…marimba (hidden). **Names are user-set labels, never identifiers.**
+  - Findings: the 46 `TRACK n` regions are standalone `karT`/`qSvE`/`qeSM` triples (~429 B each) stored in strictly increasing n order (n=5…46 back to back; 1–3 and 4 elsewhere) — region order = track order, OR simply the order the owner created them (unknown). A region's header holds NO track number (no field == n, n±1 at any consistent offset), NO owner ID shared with the registry `track_id`/strip records (searched all numeric fields), and its `qSvE.ref` values (e.g. 3138, 2770…) occur only in their own record. Regions form a linked chain (region n's trailing u16 == region n+1's `qSvE.ref`).
+  - Registry-shaped records (the named tracks) are in file order 3,4,30,6,7,8,9,38,2,… (NOT track order, also after re-save); `qSxT` per-track text/notes objects are in yet another order; `DisplayState*` has no arrangement list.
+  - Not tried yet: a general chunk-graph parser (frame = tag + version + 0x17 + id…), and the **minimal-edit diff experiment** — a baseline copy of the numbered project's ProjectData is saved in the session scratchpad (`baseline/ToTheMountains-v01-numbered-ProjectData.bin`, sha256 prefix in chat); after the owner drags ONE track to a new position and saves, diffing the two files should isolate the bytes that encode order.
+  - **Round 4 — FOUND where track numbers live (2026-10-07).** The owner moved track 1 (CUE) to position 4 and re-saved; old/new `ProjectData` are the same size, and diffing them showed the number is stored explicitly:
+    - Record shape (all in the serialized object stream): `…[X u32][n u16] 00 89 00 00 00 00 ff ff ff 3f [ID u32]…` — `X` = the track's key (an object ID), `n` = a position number. Appears in several lists; the 80-byte "table" entries (prefix has `87 00 00` at pre[5:8]) are an index of ANOTHER list (e.g. DX=9) or, in the numbered project, a first-region table (n=1..46). **Region/event entries** (every region/event on a track carries its track's current position) are the reliable source: all of a track's non-table entries share one `n`.
+    - **Link to the named track:** the track's registry-shaped name record (4 zeros · class · …· len · name) carries its key `X` as a u32 at **−170** and again at **−128** bytes before the record start. (Folder/banner tracks share key 0x10 — their names are not linked yet.)
+    - **Rule:** position(track) = the single `n` among non-table `[X][n]…89…` entries with that key. Verified: numbered project 31/31 named tracks before the move AND 31/31 after (DX/FX/MX 2,3,4 → 1,2,3); Alea v01's visible tracks 9/9 incl. tracks inside a summing stack (a "smallest n" shortcut fails there: 17 vs truth 20).
+    - Across all 24 examples (859 audio/instrument registry tracks): 696 get one consistent position, **0 duplicate positions in any project**, 36 have conflicting values (unexplained), 127 have no region/event entries at all (empty tracks, position unknown — maybe recoverable from the table type).
+    - `code_from_other_people/logicx-analyzer` (third-party RE notes) contains nothing on track order/numbers; it only lists the same fourCCs.
+    - Not done: implementation in Swift, folder/banner track names↔positions, the 36 conflicts, the 127 empty tracks, hidden-flag.
+  - **Needed to continue (ask owner):** the full numbered track list of one project with *all* tracks unhidden (name, type, number) as ground truth, plus answers on how Logic numbers/links tracks (see the questions in the chat on 2026-10-07).
 
-- [x] Copy ESLint flat-config approach from `/Users/rhyd/code/flowcus-v2/eslint.config.js`. Adapt project-specific rules, keep Sonarjs (cognitive complexity ≤15, max-lines 300).
-- [x] Add Vitest config + `npm test` / `npm run test:watch` scripts.
-- [x] Add `npm run quality` script that chains: `tsc --noEmit && eslint . && npm test`.
-- [x] Set up a pre-commit hook (Husky or `simple-git-hooks`) that runs typecheck + lint + tests on staged files.
-- [x] Verify all checks pass on the scaffolded code.
-- [x] Commit: `Tooling: ESLint flat config, Vitest, pre-commit hook`.
+- [x] **Track list = Logic's arrangement** (`ArrangementList`, `NameTexts`, `TrackObjects`, `ArrangementTracks`, `TrackPipeline.tracks`): one track per 93-byte `karT` record in track order, hidden tracks, folders/banners, tracks without regions and several tracks per object all included; each track has its own name (its `qSxT` text, else the object's name), position, object name, hidden flag (bit 0x04 at record+43), and the channel strip + plug-ins of its object. The inspector shows `#`, Channel, Name (+ hidden marker and "Object: …" when a track's name differs from its object). Projects without a recognisable list fall back to the old filtered channel strips. Verified against the owner's screenshots (numbered project incl. two tracks on one object, *Alea v01* hidden rows 5–15 and summing stack, *Please Follow me v01* shared objects/folders/Harp 1 = Inst 61) and structurally on all 26 example projects (positions 1…N, no gaps). The earlier region-entry "position" heuristic (`TrackPositions`) was removed.
+  - Known gaps: kind of tracks whose object has no channel strip we can link (summing stacks, "No Output" object tracks) is `.unknown`; the record's other bytes (type 1/5/10, UUID, remaining flags) are undecoded; `Stereo Out` output record and the trailing sentinel are skipped by rule (type byte 3 / index 0x7fffffff).
 
-## 4. Confirm `CLAUDE.md` is current
-
-A `CLAUDE.md` already exists at the repo root (committed alongside the brief). **Do not run `claude init` — it will clobber the existing file.**
-
-- [x] Read the existing `CLAUDE.md` to confirm it's still accurate.
-- [x] Once the Tauri scaffold + tooling are in place (sections 2–3), append a "Quick Reference" section to `CLAUDE.md` listing the canonical commands (`npm run tauri:dev`, `npm test`, `cargo test`, `npm run quality`).
-- [x] Section 5's beads decision: **yes** — `bd init` already added the beads section to `CLAUDE.md` linking to `bd prime`.
-- [x] Commit each `CLAUDE.md` extension separately: `CLAUDE.md: add Quick Reference once tooling is in place`.
-
-## 5. Decide: beads or no beads
-
-- [x] Ask Rhyd: "Use `bd` (beads) for issue tracking on this repo, or stick with `TASKS.md` checklists?"
-- [x] **Decision: beads.** `bd init` ran. Walking-skeleton epic = `lpx-explorer-82n` with seven child tasks (`82n.1` through `82n.7`) covering the tracer steps from BRIEF.md. From here, **`bd ready` is the source of truth for what's next** — this `TASKS.md` is frozen as the setup record.
-
-## 6. Decide: Rust crate vs Python subprocess
-
-This is the architecture choice the brief flags. Pick one **before** writing code, log the decision in `docs/decisions.md`.
-
-- [ ] **Option A (recommended)**: native Rust parser crate at `src-tauri/crates/lpx-parser/`. Walking skeleton ports `find_aus` only. Future: PyO3 bindings let the existing Python CLI consume the same crate.
-- [ ] **Option B (faster v1)**: Tauri shell that spawns the existing `lpxtool` Python helper as a subprocess and proxies its JSON. No format-parsing in Rust. Skips the port entirely.
-- [ ] Write a 5-line entry in `docs/decisions.md` recording the choice + rationale.
-
-The brief assumes Option A. If you choose B, the rest of this task list collapses to "spawn lpxtool, render its JSON output" — much simpler, far less educational, and forfeits the future shared-crate architecture.
-
-## 7. Tracer bullet — vertical slices (per BRIEF.md §"Test expectations")
-
-Each is **one RED → GREEN cycle**. Verify RED is genuine before implementing. Run `npm test` + `cargo test` after each GREEN to confirm no regressions.
-
-### 7.1 Rust parser tracer (Option A)
-
-- [ ] **RED**: write a `cargo test` against a hand-built `Vec<u8>` fixture (4 bytes manufacturer + 4 bytes `umua` + 4 bytes subtype + 8 bytes name padding). Test asserts `find_aus(&bytes)` returns `vec![one AURef { type_code: "aumu", subtype: ..., manufacturer: ... }]`. Confirm test fails with "function not found" → fix to a missing-behaviour failure.
-- [ ] **GREEN**: implement the minimal scanner in `crates/lpx-parser/src/lib.rs`. Scan for the four-byte tags `umua` / `xfua` / `fmua`, read 4 bytes either side, reverse each 4CC for the LE encoding, build the fingerprint string `"{type}/{subtype}/{manufacturer}"`.
-- [ ] Commit: `Rust: find_aus tracer (single AU descriptor scan)`.
-
-### 7.2 Rust parser real-fixture test
-
-- [ ] Decide fixture strategy: synthesise a minimal `.logicx` programmatically in tests (preferred — no real audio in repo) **or** ask Rhyd for one small `.logicx` to vendor under `tests/fixtures/` (only with explicit permission — `.logicx` files are user content).
-- [ ] **RED**: test that `find_aus` against the fixture's `ProjectData` returns ≥1 fingerprint.
-- [ ] **GREEN**: extend `find_aus` to handle the realistic byte layout (filter out 4CC matches that aren't preceded by valid manufacturer 4CCs, etc. — see Python `find_aus` for the heuristics).
-- [ ] Commit: `Rust: find_aus on real ProjectData fixture`.
-
-### 7.3 Read-only invariant test
-
-- [ ] **RED**: test that SHA-256 of `ProjectData` before parsing equals SHA-256 after parsing. Assert mtime unchanged too. Mirror `lpx-toolkit/tests/test_readonly_invariant.py`.
-- [ ] **GREEN**: confirm pass — the parser only reads bytes, never opens the file for write. (If it fails, that's a real bug; fix before continuing.)
-- [ ] Commit: `Rust: SHA-256 invariant guards read-only contract`.
-
-### 7.4 Tauri command + IPC contract
-
-- [ ] **RED**: TypeScript test (Vitest, with Tauri IPC mocked) that calls `invoke('parse_project', { path: '...' })` and expects a typed response shape `{ fingerprints: AURef[] }`. Use real types from a shared `types.ts` — no `any`, no type assertions.
-- [ ] **GREEN**: implement the Rust `#[tauri::command] fn parse_project(path: String) -> Result<ProjectSummary, ParseError>`. Wire it into `tauri::Builder::default().invoke_handler(...)`. Declare the capability in `src-tauri/capabilities/default.json`.
-- [ ] Commit: `Tauri: parse_project command + IPC contract test`.
-
-### 7.5 React frontend tracer
-
-- [ ] **RED**: Vitest + React Testing Library test for `<ProjectSummary />`. Renders a count + first fingerprint string when given a mock IPC response. No `any`, no implementation details (test rendered output, not internal state).
-- [ ] **GREEN**: implement `<App />` with a "Pick project" button (uses `@tauri-apps/plugin-dialog`'s `open({ directory: true })`), calls `parse_project`, renders `<ProjectSummary>`. Minimal CSS — list of fingerprints, that's it.
-- [ ] Commit: `React: file picker + ProjectSummary tracer`.
-
-### 7.6 Manual end-to-end smoke
-
-- [ ] Run `npm run tauri:dev`. Click "Pick project". Select a real `.logicx` from `~/Music/Logic/`. See fingerprints render.
-- [ ] If it works, take a screenshot for the README and check it in.
-- [ ] If it doesn't, debug. Don't declare done until the manual smoke passes.
-
-## 8. README + done-definition gate
-
-- [ ] Write `README.md` at the repo root: what the app is, how to dev (`npm run tauri:dev`), how to test (`npm test`, `cargo test`), what's missing relative to the Python CLI (link to `/Users/rhyd/code/lpx-toolkit`), screenshot of the working tracer.
-- [ ] Append the architecture decision to `docs/decisions.md` if you haven't already.
-- [ ] Confirm: all tests pass, ESLint clean, typecheck clean, pre-commit hooks all green.
-- [ ] Commit, push, confirm `git status` shows "up to date with origin".
-
-## 9. Hand off
-
-- [ ] Summarise for Rhyd in chat: what works, what was deferred, what the next epic should be (next likely: port `parse_project()` and the metadata extraction; then the track-registry records).
-- [ ] Note any architectural questions that came up during the skeleton (e.g. "the Rust crate naturally wants to be a workspace member — should we restructure?"), so the next session can act on them.
-
----
-
-## Non-goals reminder (don't get pulled into these during the skeleton)
-
-- Inventory tab, vendor rollup, diagnostics, phantom plugins
-- Caching layers (auval, bundles, presets, index)
-- HTTP server / `--serve` equivalent
-- `--rollup` cross-project view
-- Reveal-in-Finder, codesign integration, preset count
-- PyO3 bindings (defer)
-- Notarization (leave a stub script)
-- Auto-updater
-- Light/dark theme
-- Recursive `~/Music/Logic` browsing
-
-The skeleton is one fingerprint list from one project. Anything else waits.
+## Open (port from `legacy-tauri/src-tauri/crates/lpx-parser/src/`)
+- [ ] Track hierarchy: the Rust parser never sets `parentOffset`/`subNumber` either; folders/stacks render flat
+- [ ] Golden tests take ~25 s (debug build); `swift test --filter` for quick runs
+- [ ] Waveform drawing for the audio player (currently a scrubber only)
+- [ ] Full-size window-image lightbox (currently opens in Preview on click)
+- [ ] Visual QA of Alternatives / Audio sections with a project that actually has them
+- [ ] Recents + menu, sort options, Export README
+- [ ] Worker-count tuning: this Mac has 16 P + 4 E cores; 14 workers (70% of 20) measured *slower* than 8. Consider 70% of performance cores, or make it a setting.
+- [ ] Discovery speed: walking a whole home folder took ~52 s; consider `fts`/`getattrlistbulk` and skipping `~/Library`, `.Trash`, node_modules-like dirs.
+- [ ] Pause/resume (current UI only has Stop; rescan resumes via cache)
+- [ ] Sparkle-free update story (local use: none needed)
+- [ ] Visual QA of the SwiftUI views (built and launch-tested, not yet eyeballed)

@@ -1,0 +1,211 @@
+import Foundation
+import SQLite3
+
+public struct DatabaseStamp: Equatable, Sendable {
+    public var mtime: Int64
+    public var size: UInt64
+    public init(mtime: Int64, size: UInt64) { self.mtime = mtime; self.size = size }
+}
+
+public enum DatabaseError: Error, Equatable { case sqlite(String) }
+
+/// On-disk cache of parsed projects (SQLite, in our own Application Support folder — never inside a
+/// bundle). Each project is stored twice: a small `ProjectListEntry` loaded at launch for the list,
+/// search and filters, and the full `ProjectSummary` loaded on demand when a project is selected.
+public actor SummaryDatabase {
+    /// Bump when parser output changes so stale rows are discarded on the next launch.
+    public static let parserVersion = 6
+    private static let schemaVersion = 1
+    // SQLite must copy bound text/blobs: Swift's temporary buffers are gone after the bind call returns.
+    private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+    public static var defaultURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("LpxExplorer/library.sqlite")
+    }
+
+    private var db: OpaquePointer?
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    /// Opens (creating if needed) the store. A corrupt file is deleted and recreated — it is only a
+    /// cache, every row can be re-derived from the projects.
+    public init(url: URL, parserVersion: Int = SummaryDatabase.parserVersion) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        do {
+            db = try Self.openAndPrepare(url, parserVersion)
+        } catch {
+            for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: url.path + suffix) }
+            db = try Self.openAndPrepare(url, parserVersion)
+        }
+    }
+
+    deinit { sqlite3_close(db) }
+
+    // MARK: API
+
+    public func entries() throws -> [ProjectListEntry] {
+        var out: [ProjectListEntry] = []
+        try query("SELECT entry FROM entries") { stmt in
+            if let entry = try? decoder.decode(ProjectListEntry.self, from: blob(stmt, 0)) { out.append(entry) }
+        }
+        return out
+    }
+
+    public func stamps() throws -> [String: DatabaseStamp] {
+        var out: [String: DatabaseStamp] = [:]
+        try query("SELECT path, pd_mtime, pd_size FROM entries") { stmt in
+            out[text(stmt, 0)] = DatabaseStamp(mtime: sqlite3_column_int64(stmt, 1), size: UInt64(bitPattern: sqlite3_column_int64(stmt, 2)))
+        }
+        return out
+    }
+
+    public func summary(forPath path: String) throws -> ProjectSummary? {
+        var found: ProjectSummary?
+        try query("SELECT summary FROM details WHERE path = ?", binds: [.text(path)]) { stmt in
+            found = try? decoder.decode(ProjectSummary.self, from: blob(stmt, 0))
+        }
+        return found
+    }
+
+    public func upsert(_ summaries: [ProjectSummary]) throws {
+        guard !summaries.isEmpty else { return }
+        try exec("BEGIN IMMEDIATE")
+        do {
+            for s in summaries {
+                let entry = try encoder.encode(ProjectListEntry(summary: s))
+                let full = try encoder.encode(s)
+                try run("INSERT OR REPLACE INTO entries(path, pd_mtime, pd_size, entry) VALUES (?,?,?,?)",
+                        [.text(s.path), .int(s.projectDataMTime), .int(Int64(bitPattern: s.projectDataSize)), .blob(entry)])
+                try run("INSERT OR REPLACE INTO details(path, summary) VALUES (?,?)", [.text(s.path), .blob(full)])
+            }
+            try exec("COMMIT")
+        } catch {
+            try? exec("ROLLBACK")
+            throw error
+        }
+    }
+
+    public func remove(paths: [String]) throws {
+        guard !paths.isEmpty else { return }
+        try exec("BEGIN IMMEDIATE")
+        do {
+            for p in paths {
+                try run("DELETE FROM entries WHERE path = ?", [.text(p)])
+                try run("DELETE FROM details WHERE path = ?", [.text(p)])
+            }
+            try exec("COMMIT")
+        } catch {
+            try? exec("ROLLBACK")
+            throw error
+        }
+    }
+
+    public func count() throws -> Int {
+        var n = 0
+        try query("SELECT COUNT(*) FROM entries") { n = Int(sqlite3_column_int64($0, 0)) }
+        return n
+    }
+
+    /// Test hook: a row whose list entry cannot be decoded.
+    func corruptEntryForTesting(path: String) throws {
+        try run("INSERT OR REPLACE INTO entries(path, pd_mtime, pd_size, entry) VALUES (?,0,0,?)", [.text(path), .blob(Data([0x00, 0xFF, 0x7B]))])
+    }
+
+    // MARK: SQLite plumbing
+
+    private enum Bind { case text(String), int(Int64), blob(Data) }
+
+    private static func openAndPrepare(_ url: URL, _ parserVersion: Int) throws -> OpaquePointer {
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK, let db = handle else {
+            let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "open failed"
+            sqlite3_close(handle)
+            throw DatabaseError.sqlite(message)
+        }
+        func exec(_ sql: String) throws {
+            var err: UnsafeMutablePointer<CChar>?
+            if sqlite3_exec(db, sql, nil, nil, &err) != SQLITE_OK {
+                let message = err.map { String(cString: $0) } ?? "sqlite error"
+                sqlite3_free(err)
+                sqlite3_close(db)
+                throw DatabaseError.sqlite(message)
+            }
+        }
+        try exec("PRAGMA journal_mode = WAL")
+        try exec("PRAGMA synchronous = NORMAL")
+        try exec("""
+            CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS entries(path TEXT PRIMARY KEY, pd_mtime INTEGER NOT NULL, pd_size INTEGER NOT NULL, entry BLOB NOT NULL);
+            CREATE TABLE IF NOT EXISTS details(path TEXT PRIMARY KEY, summary BLOB NOT NULL);
+            """)
+        // Stale parser output (or schema) ⇒ drop every row; they are re-derived by the next scan.
+        let wanted = "\(schemaVersion)/\(parserVersion)"
+        var stored: String?
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT value FROM meta WHERE key = 'version'", -1, &stmt, nil) == SQLITE_OK, sqlite3_step(stmt) == SQLITE_ROW {
+            stored = sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+        }
+        sqlite3_finalize(stmt)
+        if stored != wanted {
+            try exec("DELETE FROM entries; DELETE FROM details; INSERT OR REPLACE INTO meta(key, value) VALUES ('version', '\(wanted)')")
+        }
+        return db
+    }
+
+    private func exec(_ sql: String) throws {
+        var err: UnsafeMutablePointer<CChar>?
+        if sqlite3_exec(db, sql, nil, nil, &err) != SQLITE_OK {
+            let message = err.map { String(cString: $0) } ?? "sqlite error"
+            sqlite3_free(err)
+            throw DatabaseError.sqlite(message)
+        }
+    }
+
+    private func run(_ sql: String, _ binds: [Bind]) throws {
+        try query(sql, binds: binds) { _ in }
+    }
+
+    /// Prepares `sql`, binds the values (always copied by SQLite) and calls `row` for every result row.
+    private func query(_ sql: String, binds: [Bind] = [], row: (OpaquePointer) throws -> Void) throws {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            throw DatabaseError.sqlite(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        for (i, b) in binds.enumerated() {
+            let idx = Int32(i + 1)
+            let rc: Int32
+            switch b {
+            case .text(let s): rc = sqlite3_bind_text(stmt, idx, s, -1, Self.transient)
+            case .int(let v): rc = sqlite3_bind_int64(stmt, idx, v)
+            case .blob(let d): rc = d.withUnsafeBytes { sqlite3_bind_blob(stmt, idx, $0.baseAddress, Int32(d.count), Self.transient) }
+            }
+            guard rc == SQLITE_OK else { throw DatabaseError.sqlite(String(cString: sqlite3_errmsg(db))) }
+        }
+        while true {
+            switch sqlite3_step(stmt) {
+            case SQLITE_ROW: try row(stmt)
+            case SQLITE_DONE: return
+            default: throw DatabaseError.sqlite(String(cString: sqlite3_errmsg(db)))
+            }
+        }
+    }
+
+    private func text(_ stmt: OpaquePointer, _ col: Int32) -> String {
+        sqlite3_column_text(stmt, col).map { String(cString: $0) } ?? ""
+    }
+
+    private func blob(_ stmt: OpaquePointer, _ col: Int32) -> Data {
+        guard let p = sqlite3_column_blob(stmt, col) else { return Data() }
+        return Data(bytes: p, count: Int(sqlite3_column_bytes(stmt, col)))
+    }
+}
+
+extension SummaryDatabase {
+    /// One-time cleanup: earlier builds cached everything in `parse-cache.json` inside our own support
+    /// folder. SQLite replaces it, so delete the obsolete file. Touches nothing else.
+    public static func removeLegacyJSONCache(in supportDirectory: URL) {
+        try? FileManager.default.removeItem(at: supportDirectory.appendingPathComponent("parse-cache.json"))
+    }
+}

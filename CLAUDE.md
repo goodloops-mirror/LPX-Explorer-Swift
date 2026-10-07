@@ -1,105 +1,63 @@
-# lpx-explorer
+# lpx-explorer (SwiftUI)
 
-Tauri 2 + React 19 + TypeScript desktop app for macOS. A read-only inspector for Logic Pro `.logicx` project bundles. Surfaces the AU plug-ins, tracks, and metadata stored in the undocumented binary `ProjectData` file inside each bundle, without launching Logic.
+Native macOS app (SwiftUI, macOS 14+) — a **read-only** inspector for Logic Pro `.logicx` bundles. It surfaces plug-ins, tracks and metadata from the undocumented binary `ProjectData` file without launching Logic.
 
-This repo is currently a **walking-skeleton port** of an existing Python CLI (`lpx-toolkit`). See `BRIEF.md` for the architecture and scope of the skeleton; see `TASKS.md` for the step-by-step plan.
+This is a rewrite of the original Tauri/React/Rust app, which is kept untouched in `legacy-tauri/` as the reference (parser source of truth: `legacy-tauri/src-tauri/crates/lpx-parser/`, format notes: `legacy-tauri/docs/logicx-format.md`).
 
-## Sources of truth
+## Hard rules
 
-- **Development discipline** (TDD rules, decision logging, code conventions, testing patterns): `/Users/rhyd/code/flowcus-v2/CLAUDE.md`. Read it before writing code. Inherit those rules unless this file or `BRIEF.md` says otherwise.
-- **Format-parsing knowledge** (4CC anchors, AU descriptor layout, registry record signatures, what's reverse-engineered, what's still open): `/Users/rhyd/code/lpx-toolkit/CLAUDE.md` and the parser at `/Users/rhyd/code/lpx-toolkit/lpx_inspect.py`. Trust those byte offsets — they were empirically derived against real Logic projects.
-- **What we're building**: `BRIEF.md` (this directory).
-- **What to do next**: `TASKS.md` (this directory).
+- **Never push or open PRs — the owner pushes manually** to their own Forgejo (`origin`). The old `DISABLED_NO_PUSH` guard was removed on request, so nothing technical stops a push: don't. Commit locally only when asked.
+- **Read-only contract.** Never write inside a `.logicx` bundle. `ProjectParserTests.testParseDoesNotMutateTheBundle` (SHA-256 + mtime) gates this. The app only writes to `~/Library/Application Support/LpxExplorer/`.
+- **macOS only.** No cross-platform conditionals.
+- **TDD, vertical slices.** One failing test → minimal code → repeat. Verify RED fails on missing *behaviour* (a stub returning empty), not on a compile error. Port the Rust tests in `legacy-tauri` alongside each Rust function.
+- No npm / node on this machine. Don't add JS tooling.
 
-## Hard rules specific to this repo
+## Layout
 
-- **Read-only contract.** Never write to a `.logicx` file under any circumstance. A SHA-256 invariant test gates the parser — `.logicx` files are irreplaceable user work.
-- **macOS-only.** Logic Pro is mac-only; don't add Windows/Linux conditionals.
-- **TDD non-negotiable.** RED → GREEN → REFACTOR in *vertical* slices (one test → one implementation → repeat). Tracer bullet first. No horizontal slicing. See `flowcus-v2/CLAUDE.md` "Testing" for the full discipline.
-- **Verify RED is genuine.** A test that fails with `ImportError` / "function not defined" is not RED — it's broken-test-infrastructure. Fix it until the failure points at *missing behaviour*, then implement.
-- **No `any` types or type assertions in tests.** Use real schemas from a shared `types.ts`.
+```
+Package.swift
+Sources/LpxCore/       parser + scanner (no UI, Foundation only)
+Sources/LpxExplorer/   SwiftUI app
+Sources/lpx-scan/      CLI: time/validate the scanner on a real folder (read-only)
+Tests/LpxCoreTests/    XCTest suite
+scripts/make-app.sh    builds "build/LPX Explorer.app" (ad-hoc signed)
+legacy-tauri/          the original app, reference only
+```
 
-## Working mode
+## Commands
 
-This repo's tooling will mature over the course of the walking skeleton (Tauri scaffold → ESLint flat config → Vitest → pre-commit hooks). Until those land, the canonical commands don't exist yet — see `TASKS.md` section 3 for the sequence to set them up. The end state should match flowcus-v2's quality gates (typecheck + ESLint + tests via `npm run quality`, `cargo test` for Rust).
+```bash
+swift test                              # all tests
+swift run LpxExplorer                   # run the app unbundled
+./scripts/make-app.sh                   # build a double-clickable .app
+swift build -c release --product lpx-scan && .build/release/lpx-scan <folder> [workers]
+```
 
-## Issue tracking
+## Test material & oracle
 
-Currently undecided between `bd` (beads, as flowcus-v2 uses) and a plain `TASKS.md` checklist. `TASKS.md` section 5 flags this — ask the user before spending time on `bd init`.
+- **Only `example_projects/` may be read as real project data** (git-ignored, ~1.2 GB, large real projects). Never read or scan any other `.logicx` on the machine, and never commit `example_projects/` or `Tests/Golden/`.
+- `scripts/make-golden.sh` runs the legacy Rust parser (`scripts/oracle/`, needs cargo) over `example_projects/` and writes `Tests/Golden/*.json`. `GoldenAUTests` / `GoldenTrackTests` require the Swift parser to reproduce those results exactly; they skip if either folder is missing. When changing a scanner, keep them green — they are the real regression net.
+- **Known, intentional differences from the Rust oracle:** (1) `AUFinder` drops standard-triple hits inside printable text blobs (base64 noise) — the golden test checks each removal independently and that no installed plug-in is lost; (2) verdict counts unique plug-ins; (3) `aumf` is an audio effect in categories/grouping; (4) CAF is previewable. Update the golden tests, not the oracle, when adding such a deliberate difference.
+- **Track list** (`ArrangementList` → `ArrangementTracks`) is verified against Logic's own display (the owner's screenshots of `example_projects`), not the Rust oracle (which has no such feature; `TrackPipeline.channelStrips` is the Rust-equivalent view the golden tests compare). Record layout: TASKS.md ("SOLVED … the arrangement track list").
+- Debug-build golden tests take ~25 s; use `swift test --filter <TestClass>` while iterating.
+- Profile stages with `swift build -c release --product lpx-scan && .build/release/lpx-scan example_projects --profile`.
+
+## Local-only
+
+The app makes **no network requests**: no updater, no analytics, no web search. `NoNetworkTests` scans `Sources/` for network/updater APIs and URLs, rejects `NSWorkspace.open` on anything but local files, and requires an empty dependency list. Don't add `URLSession`, WebKit, Sparkle, or any package. (Project files are only ever *revealed* in Finder, never opened.)
+
+## Scan & storage architecture
+
+`LogicxDiscovery` walks folders (bundles are leaves) → `LibraryScanner.scan` parses with a bounded worker pool (default 70% of logical cores). Whether a project changed is decided from a **stamp** (ProjectData mtime+size) kept in SQLite, so unchanged projects are reported `.unchanged` without being read.
+
+Storage is `SummaryDatabase` (SQLite via the system `sqlite3`, `~/Library/Application Support/LpxExplorer/library.sqlite`, WAL):
+- `entries` — a small `ProjectListEntry` per project (metadata, unique plug-ins with counts, track count, folded search text). Loaded in the background at launch (~0.3 s for 3,000 projects) and held in memory for the list, search, filters, verdicts and the plug-in view.
+- `details` — the full `ProjectSummary` (tracks, alternatives, …), loaded only when a project is selected (~2 ms).
+- Writes are incremental: only projects parsed in the last batch are upserted. Bump `SummaryDatabase.parserVersion` whenever parser output changes (rows are then dropped and re-derived).
+- Always bind SQLite text/blobs with `SQLITE_TRANSIENT` (Swift's temporary buffers don't outlive the call).
+
+UI: `OutcomeCollector` batches scan results → `LibraryModel` applies them every ~150 ms. The natural name sort is cached per folder (don't sort in view bodies; it cost ~0.5 s per refresh at 3,000 projects).
 
 ## When stuck
 
-Read the Python source-of-truth at `/Users/rhyd/code/lpx-toolkit/lpx_inspect.py`. Don't re-derive the `.logicx` format from first principles — every offset and signature whitelist is encoded there.
-
-## Quick Reference
-
-```bash
-npm run tauri:dev    # Full Tauri dev mode (Rust + frontend)
-npm run dev          # Vite dev server only (Tauri calls this automatically)
-npm test             # Vitest single run
-npm run test:watch   # Vitest watch mode
-npm run lint         # eslint .
-npm run typecheck    # tsc --noEmit
-npm run quality      # typecheck + lint + test
-cargo test           # Rust tests (run from src-tauri/ or src-tauri/crates/<crate>)
-```
-
-Pre-commit hook (`.husky/pre-commit`) runs typecheck, lint-staged on TS/TSX files (`eslint --max-warnings=0`), and the full test suite. Bypass with `git commit --no-verify` for emergencies only.
-
-Rust toolchain pinned in `rust-toolchain.toml` (channel `1.88`, the flowcus-v2 floor).
-
-
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
-## Beads Issue Tracker
-
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
-```
-
-### Rules
-
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
-
-## Agent Context Profiles
-
-The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
-
-- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
-- **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
-- **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
-
-## Session Completion
-
-This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
-
-1. **File issues for remaining work** - Create beads for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **Handle git/sync by active profile**:
-   ```bash
-   # Conservative/minimal/default: report status and proposed commands; wait for approval.
-   git status
-
-   # Team-maintainer opt-in only, unless current instructions forbid it:
-   git pull --rebase
-   git push
-   git status
-   ```
-5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
-
-**Critical rules:**
-- Explicit user or orchestrator instructions override this Beads block.
-- Do not commit or push without clear authority from the active profile or the current user request.
-- If a required sync or push is blocked, stop and report the exact command and error.
-<!-- END BEADS INTEGRATION -->
+Don't re-derive the format. Read the Rust parser in `legacy-tauri/src-tauri/crates/lpx-parser/src/` and port its offsets and test fixtures.
