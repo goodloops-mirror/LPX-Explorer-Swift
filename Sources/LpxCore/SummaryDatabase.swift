@@ -15,7 +15,7 @@ public enum DatabaseError: Error, Equatable { case sqlite(String) }
 public actor SummaryDatabase {
     /// Bump when parser output changes so stale rows are discarded on the next launch.
     public static let parserVersion = 6
-    private static let schemaVersion = 1
+    private static let schemaVersion = 2
     // SQLite must copy bound text/blobs: Swift's temporary buffers are gone after the bind call returns.
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -78,6 +78,12 @@ public actor SummaryDatabase {
                 try run("INSERT OR REPLACE INTO entries(path, pd_mtime, pd_size, entry) VALUES (?,?,?,?)",
                         [.text(s.path), .int(s.projectDataMTime), .int(Int64(bitPattern: s.projectDataSize)), .blob(entry)])
                 try run("INSERT OR REPLACE INTO details(path, summary) VALUES (?,?)", [.text(s.path), .blob(full)])
+                try run("DELETE FROM tracks WHERE path = ?", [.text(s.path)])
+                for r in TrackSearchRow.rows(for: s) {
+                    try run("INSERT INTO tracks(path, position, kind, hidden, name, object_name, channel, text, fingerprints, project_text) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            [.text(r.path), .int(Int64(r.position)), .text(r.kind.rawValue), .int(r.isHidden ? 1 : 0), .text(r.name),
+                             .text(r.objectName), .text(r.channel), .text(r.text), .text(r.fingerprints), .text(r.projectText)])
+                }
             }
             try exec("COMMIT")
         } catch {
@@ -93,12 +99,66 @@ public actor SummaryDatabase {
             for p in paths {
                 try run("DELETE FROM entries WHERE path = ?", [.text(p)])
                 try run("DELETE FROM details WHERE path = ?", [.text(p)])
+                try run("DELETE FROM tracks WHERE path = ?", [.text(p)])
             }
             try exec("COMMIT")
         } catch {
             try? exec("ROLLBACK")
             throw error
         }
+    }
+
+    /// Tracks matching every term. A term matches a track's own text (track, object, channel, stock plug-in names), a plug-in
+    /// the registry resolved for it, or — for terms that aren't found at track level — the project's name; at least one term
+    /// must match at track level, so a project-name match alone isn't expanded into all of that project's tracks.
+    /// Ordered by project name (natural) then track number; `limit` cuts the list, `total` counts every match.
+    public func searchTracks(_ query: TrackSearchQuery, limit: Int) throws -> TrackSearchResult {
+        guard !query.isEmpty else { return TrackSearchResult(hits: [], total: 0) }
+        func trackMatch(_ i: Int) -> (sql: String, binds: [Bind]) {
+            var sql = "instr(text, ?) > 0"
+            var b: [Bind] = [.text(query.terms[i])]
+            for fp in i < query.pluginFingerprints.count ? query.pluginFingerprints[i] : [] {
+                sql += " OR instr(fingerprints, ?) > 0"
+                b.append(.text("|" + fp + "|"))
+            }
+            return ("(" + sql + ")", b)
+        }
+        var binds: [Bind] = []
+        var all: [String] = [], any: [String] = []
+        for i in query.terms.indices {
+            let m = trackMatch(i)
+            all.append("(" + m.sql + " OR instr(project_text, ?) > 0)")
+            binds += m.binds + [.text(query.terms[i])]
+        }
+        for i in query.terms.indices { let m = trackMatch(i); any.append(m.sql); binds += m.binds }
+        let sql = "SELECT id, path, position FROM tracks WHERE " + all.joined(separator: " AND ") + " AND (" + any.joined(separator: " OR ") + ")"
+        var matches: [(id: Int64, path: String, position: Int)] = []
+        try self.query(sql, binds: binds) { stmt in
+            matches.append((sqlite3_column_int64(stmt, 0), text(stmt, 1), Int(sqlite3_column_int64(stmt, 2))))
+        }
+        var nameCache: [String: String] = [:]
+        func projectName(_ path: String) -> String {
+            if let n = nameCache[path] { return n }
+            let n = ProjectBundle.bundleName(URL(fileURLWithPath: path)); nameCache[path] = n; return n
+        }
+        matches.sort { a, b in
+            if a.path != b.path {
+                let order = projectName(a.path).localizedStandardCompare(projectName(b.path))
+                return order == .orderedSame ? a.path < b.path : order == .orderedAscending
+            }
+            return a.position < b.position
+        }
+        let page = Array(matches.prefix(max(0, limit)))
+        var hits: [TrackHit] = []
+        for m in page {
+            try self.query("SELECT path, position, kind, hidden, name, object_name, channel, fingerprints FROM tracks WHERE id = ?", binds: [.int(m.id)]) { stmt in
+                let fps = text(stmt, 7).split(separator: "|").map(String.init)
+                hits.append(TrackHit(path: text(stmt, 0), position: Int(sqlite3_column_int64(stmt, 1)), kind: TrackKind(rawValue: text(stmt, 2)) ?? .unknown,
+                                     isHidden: sqlite3_column_int64(stmt, 3) != 0, name: text(stmt, 4), objectName: text(stmt, 5),
+                                     channel: text(stmt, 6), pluginFingerprints: fps))
+            }
+        }
+        return TrackSearchResult(hits: hits, total: matches.count)
     }
 
     public func count() throws -> Int {
@@ -138,6 +198,9 @@ public actor SummaryDatabase {
             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS entries(path TEXT PRIMARY KEY, pd_mtime INTEGER NOT NULL, pd_size INTEGER NOT NULL, entry BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS details(path TEXT PRIMARY KEY, summary BLOB NOT NULL);
+            CREATE TABLE IF NOT EXISTS tracks(id INTEGER PRIMARY KEY, path TEXT NOT NULL, position INTEGER NOT NULL, kind TEXT NOT NULL, hidden INTEGER NOT NULL,
+                name TEXT NOT NULL, object_name TEXT NOT NULL, channel TEXT NOT NULL, text TEXT NOT NULL, fingerprints TEXT NOT NULL, project_text TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS tracks_path ON tracks(path);
             """)
         // Stale parser output (or schema) ⇒ drop every row; they are re-derived by the next scan.
         let wanted = "\(schemaVersion)/\(parserVersion)"
@@ -148,7 +211,7 @@ public actor SummaryDatabase {
         }
         sqlite3_finalize(stmt)
         if stored != wanted {
-            try exec("DELETE FROM entries; DELETE FROM details; INSERT OR REPLACE INTO meta(key, value) VALUES ('version', '\(wanted)')")
+            try exec("DELETE FROM entries; DELETE FROM details; DELETE FROM tracks; INSERT OR REPLACE INTO meta(key, value) VALUES ('version', '\(wanted)')")
         }
         return db
     }

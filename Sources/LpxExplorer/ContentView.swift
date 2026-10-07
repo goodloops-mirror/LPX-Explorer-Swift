@@ -10,7 +10,7 @@ struct ContentView: View {
         NavigationSplitView {
             SidebarView()
         } content: {
-            if model.isPluginView { PluginRailView() } else { ProjectListView() }
+            if model.isPluginView { PluginRailView() } else if model.isSearching { SearchResultsView() } else { ProjectListView() }
         } detail: {
             if model.isPluginView {
                 if let fp = model.selectedPlugin, let row = model.pluginRows.first(where: { $0.fingerprint == fp }) {
@@ -26,6 +26,7 @@ struct ContentView: View {
                 ContentUnavailableView("Select a project", systemImage: "music.note.list")
             }
         }
+        .id(model.layoutResets)
         .searchable(
             text: Binding(get: { model.isPluginView ? model.pluginQuery : model.query },
                           set: { if model.isPluginView { model.pluginQuery = $0 } else { model.query = $0 } }),
@@ -73,7 +74,7 @@ struct SidebarView: View {
                 }
             }
         }
-        .navigationSplitViewColumnWidth(min: 180, ideal: 220)
+        .navigationSplitViewColumnWidth(min: 160, ideal: 225)
         .toolbar {
             ToolbarItem { Button { model.chooseFolder() } label: { Label("Add Folder", systemImage: "folder.badge.plus") } }
         }
@@ -110,7 +111,7 @@ struct ProjectListView: View {
             }
         }
         .navigationTitle(model.selectedFolder.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Projects")
-        .navigationSplitViewColumnWidth(min: 260, ideal: 340)
+        .navigationSplitViewColumnWidth(min: 260, ideal: 750)
         .overlay {
             if model.selectedFolder != nil, paths.isEmpty, !model.isScanning {
                 if model.query.isEmpty && (model.similarityFilter != nil || model.onlyMissingPlugins) {
@@ -253,6 +254,101 @@ struct ScanBanner: View {
             .font(.callout)
             .padding(.horizontal, 12).padding(.vertical, 8)
             .background(.bar)
+        }
+    }
+}
+
+/// Library-wide search results: one row per matching track, grouped under its project; projects matched by name alone first.
+struct SearchResultsView: View {
+    @Environment(LibraryModel.self) private var model
+    @Environment(AuRegistry.self) private var registry
+
+    private struct Group: Identifiable { let path: String; let hits: [TrackHit]; var id: String { path } }
+
+    private var groups: [Group] {
+        var order: [String] = [], byPath: [String: [TrackHit]] = [:]
+        for h in model.trackResults.hits {
+            if byPath[h.path] == nil { order.append(h.path) }
+            byPath[h.path, default: []].append(h)
+        }
+        return order.map { Group(path: $0, hits: byPath[$0] ?? []) }
+    }
+
+    var body: some View {
+        @Bindable var model = model
+        let nameOnly = model.projectNameMatches
+        List(selection: $model.selectedProject) {
+            if !nameOnly.isEmpty {
+                Section("Projects (\(nameOnly.count))") {
+                    ForEach(nameOnly, id: \.self) { path in ProjectRow(path: path).tag(path) }
+                }
+            }
+            ForEach(groups) { g in
+                Section {
+                    ForEach(g.hits, id: \.position) { h in
+                        TrackHitRow(hit: h, terms: SearchMatcher.terms(of: model.query))
+                            .contentShape(Rectangle())
+                            .onTapGesture { model.showTrack(path: h.path, position: h.position) }
+                    }
+                } header: {
+                    Text(LibraryModel.projectName(g.path))
+                }
+            }
+            if model.trackResults.total > model.trackResults.hits.count {
+                Text("Showing \(model.trackResults.hits.count) of \(model.trackResults.total) tracks — refine the search to see the rest.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Search")
+        .navigationSubtitle("\(model.trackResults.total) track\(model.trackResults.total == 1 ? "" : "s")")
+        .navigationSplitViewColumnWidth(min: 300, ideal: 750)
+        .overlay {
+            if nameOnly.isEmpty && model.trackResults.hits.isEmpty && !model.isScanning {
+                ContentUnavailableView.search(text: model.query)
+            }
+        }
+    }
+}
+
+struct TrackHitRow: View {
+    @Environment(AuRegistry.self) private var registry
+    let hit: TrackHit
+    let terms: [String]
+
+    private func highlighted(_ s: String) -> AttributedString {
+        var out = AttributedString(s)
+        let folded = SearchMatcher.fold(s)
+        // Folding preserves character count for ordinary text; skip highlighting if it doesn't.
+        guard folded.count == s.count else { return out }
+        for term in terms {
+            var from = folded.startIndex
+            while let r = folded.range(of: term, range: from..<folded.endIndex) {
+                let lo: Int = folded.distance(from: folded.startIndex, to: r.lowerBound)
+                let len: Int = folded.distance(from: r.lowerBound, to: r.upperBound)
+                let a = out.index(out.startIndex, offsetByCharacters: lo)
+                let b = out.index(a, offsetByCharacters: len)
+                out[a..<b].backgroundColor = Color.yellow.opacity(0.35)
+                from = r.upperBound
+            }
+        }
+        return out
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(hit.position)").font(.body.monospacedDigit()).foregroundStyle(.secondary).frame(width: 32, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(highlighted(hit.name.isEmpty ? "—" : hit.name)).lineLimit(1)
+                    if hit.isHidden { Image(systemName: "eye.slash").font(.caption).foregroundStyle(.secondary).help("Hidden in Logic's arrangement") }
+                }
+                if !hit.objectName.isEmpty, hit.objectName != hit.name {
+                    Text(highlighted("Object: \(hit.objectName)")).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                }
+                if !hit.channel.isEmpty, hit.channel != hit.name {
+                    Text(highlighted(hit.channel)).font(.caption.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
+                }
+            }
         }
     }
 }

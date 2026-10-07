@@ -26,7 +26,11 @@ struct LpxExplorerApp: App {
                     model.start()
                 }
         }
+        .defaultSize(width: 1500, height: 860)
         .commands {
+            CommandGroup(after: .toolbar) {
+                Button("Reset Column Widths") { model.resetColumnWidths() }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("Add Folder…") { model.chooseFolder() }.keyboardShortcut("o")
                 Button("Rescan Library") { model.rescanAll() }.keyboardShortcut("r")

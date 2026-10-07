@@ -88,6 +88,7 @@ struct ProjectDetailView: View {
             }
             ForEach(tracks, id: \.offset) { t in
                 let name = t.displayName
+                let focused = model.focusedTrack?.path == summary.path && t.position != nil && model.focusedTrack?.position == t.position
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(t.position.map(String.init) ?? "—")
                         .font(.body.monospacedDigit()).foregroundStyle(t.position == nil ? .tertiary : .primary)
@@ -112,6 +113,9 @@ struct ProjectDetailView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .padding(.vertical, 2)
+                .background(focused ? Color.yellow.opacity(0.25) : .clear, in: RoundedRectangle(cornerRadius: 4))
+                .id(t.offset)
             }
         } header: {
             Text("Tracks (\(tracks.count)" + (hiddenCount > 0 ? ", \(hiddenCount) hidden)" : ")"))
@@ -146,8 +150,23 @@ struct ProjectDetailView: View {
         }
     }
 
+    private func scrollToFocusedTrack(_ proxy: ScrollViewProxy) {
+        guard let f = model.focusedTrack, f.path == summary.path,
+              let t = summary.tracks.first(where: { $0.position == f.position }) else { return }
+        // The Form lays out lazily and row heights vary (plug-in lines), so the first jump can land short of
+        // rows that aren't realised yet. Repeat it as the layout settles; each pass starts closer.
+        Task {
+            for delay in [120, 350, 800] {
+                try? await Task.sleep(for: .milliseconds(delay))
+                guard !Task.isCancelled, model.focusedTrack?.position == f.position else { return }
+                withAnimation { proxy.scrollTo(t.offset, anchor: .center) }
+            }
+        }
+    }
+
     var body: some View {
         let m = summary.metadata
+        ScrollViewReader { proxy in
         Form {
             Section { CompatibilityBand(summary: summary) }
             if let image = summary.alternatives.first(where: { $0.index == selectedVariant })?.windowImagePath {
@@ -201,6 +220,7 @@ struct ProjectDetailView: View {
         }
         .formStyle(.grouped)
         .task(id: base.path) { variantSummary = nil; variantError = nil }
+        .task(id: model.focusedTrack?.position) { scrollToFocusedTrack(proxy) }
         .navigationTitle(LibraryModel.projectName(summary.path))
         .navigationSubtitle(url.deletingLastPathComponent().path)
         .toolbar {
@@ -209,6 +229,7 @@ struct ProjectDetailView: View {
                 Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: { Label("Reveal in Finder", systemImage: "folder") }
                     .help("Reveal this project in Finder")
             }
+        }
         }
     }
 }

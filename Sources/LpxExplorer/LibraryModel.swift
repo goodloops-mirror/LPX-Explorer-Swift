@@ -31,14 +31,31 @@ final class LibraryModel {
     private(set) var errors: [String: String] = [:]
     /// True while the cached library is being read from disk at launch.
     private(set) var isLoadingCache = false
-    private(set) var isScanning = false
+    private(set) var isScanning = false { didSet { if oldValue && !isScanning { scheduleSearch() } } }
     private(set) var scanTotal = 0
     private(set) var scanDone = 0
     private(set) var scanMessage: String?
 
     var selectedFolder: String? { didSet { if oldValue != selectedFolder { similarityFilter = nil } } }
     var selectedProject: String?
-    var query = ""
+    /// Bumped by "Reset Column Widths": rebuilds the split view so the default proportions (15 / 50 / 35 %) apply again.
+    private(set) var layoutResets = 0
+
+    func resetColumnWidths() {
+        // AppKit keeps divider positions of autosaved split views in our own UserDefaults; forget them.
+        for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains("SplitView") {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        layoutResets += 1
+    }
+    var query = "" { didSet { if oldValue != query { if query.isEmpty { focusedTrack = nil }; scheduleSearch() } } }
+    /// Library-wide track search (while `query` is non-empty): matching tracks, and projects matched by name alone.
+    private(set) var trackResults = TrackSearchResult(hits: [], total: 0)
+    private(set) var projectNameMatches: [String] = []
+    /// Track to scroll to / highlight in the inspector after a result was clicked.
+    var focusedTrack: (path: String, position: Int)?
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
+    static let searchLimit = 500
     /// "Find similar" pivot (key / tempo); applies to the selected folder.
     var similarityFilter: SimilarityAxis?
     var onlyMissingPlugins = false
@@ -266,6 +283,37 @@ final class LibraryModel {
     }
 
     // MARK: search
+
+    var isSearching: Bool { !SearchMatcher.terms(of: query).isEmpty && !isPluginView }
+
+    /// Re-run the library-wide search shortly after the last keystroke (and after a scan finished).
+    func scheduleSearch() {
+        searchTask?.cancel()
+        let text = query
+        guard !SearchMatcher.terms(of: text).isEmpty else { trackResults = TrackSearchResult(hits: [], total: 0); projectNameMatches = []; return }
+        searchTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled, let self else { return }
+            let q = TrackSearchQuery(text: text) { self.pluginFingerprints(matching: $0) }
+            let result = (try? await self.db?.searchTracks(q, limit: Self.searchLimit)) ?? TrackSearchResult(hits: [], total: 0)
+            guard !Task.isCancelled else { return }
+            let nameMatches = self.entries.keys.filter { SearchMatcher.matches(haystack: SearchMatcher.fold(Self.projectName($0)), terms: q.terms) }
+                .sorted { Self.projectName($0).localizedStandardCompare(Self.projectName($1)) == .orderedAscending }
+            self.trackResults = result
+            self.projectNameMatches = nameMatches
+        }
+    }
+
+    /// Fingerprints of installed plug-ins whose registry name contains `term` (already folded).
+    private func pluginFingerprints(matching term: String) -> [String] {
+        registry.entries.values.filter { SearchMatcher.fold($0.name).contains(term) }.map(\.fingerprint)
+    }
+
+    /// Open a search result: select its project and ask the inspector to show the track.
+    func showTrack(path: String, position: Int) {
+        showProject(path)
+        focusedTrack = (path, position)
+    }
 
     static func projectName(_ path: String) -> String {
         URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent

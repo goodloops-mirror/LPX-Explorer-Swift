@@ -1,0 +1,175 @@
+import XCTest
+@testable import LpxCore
+
+final class TrackSearchRowTests: XCTestCase {
+    private func summary(path: String = "/Music/Café Song.logicx", tracks: [Track]) -> ProjectSummary {
+        ProjectSummary(path: path, fingerprints: [], tracks: tracks, metadata: ProjectMetadata(),
+                       stats: BundleStats(sizeBytes: 0, createdAt: 0, modifiedAt: 0), projectDataMTime: 1, projectDataSize: 1)
+    }
+
+    func testRowCarriesDisplayFieldsAndFoldedSearchText() {
+        let stock = AURef(typeCode: "aufx", subtype: "chan", manufacturer: "appl", offset: 0, displayName: "Channel EQ")
+        let third = AURef(typeCode: "aufx", subtype: "FQ3p", manufacturer: "FabF", offset: 0)
+        let t = Track(name: "Audio 7", userName: "Swéll Pad", kind: .audio, offset: 5, isActive: true, audioFx: [stock, third, stock],
+                      position: 12, objectName: "Old Strings Object", isHidden: true)
+        let row = TrackSearchRow.rows(for: summary(tracks: [t])).first
+        XCTAssertEqual(row?.path, "/Music/Café Song.logicx")
+        XCTAssertEqual(row?.position, 12)
+        XCTAssertEqual(row?.kind, .audio)
+        XCTAssertEqual(row?.isHidden, true)
+        XCTAssertEqual(row?.name, "Swéll Pad")
+        XCTAssertEqual(row?.objectName, "Old Strings Object")
+        XCTAssertEqual(row?.channel, "Audio 7")
+        for needle in ["swell pad", "old strings object", "audio 7", "channel eq"] { XCTAssertTrue(row?.text.contains(needle) ?? false, needle) }
+        XCTAssertFalse(row?.text.contains("fq3p") ?? true, "plug-ins the file doesn't name are found through the registry, not the text")
+        XCTAssertEqual(row?.fingerprints, "|aufx/chan/appl|aufx/FQ3p/FabF|", "unique, in first-seen order")
+        XCTAssertEqual(row?.projectText, "cafe song")
+    }
+
+    func testTracksWithoutAnArrangementPositionAreNotIndexed() {
+        let strip = Track(name: "Audio 1", kind: .audio, offset: 1, isActive: true)   // fallback channel-strip view, no number
+        XCTAssertTrue(TrackSearchRow.rows(for: summary(tracks: [strip])).isEmpty)
+    }
+
+    func testDefaultNamedTrackUsesItsChannelAsDisplayName() {
+        let t = Track(name: "Inst 3", kind: .instrument, offset: 1, isActive: true, position: 2)
+        XCTAssertEqual(TrackSearchRow.rows(for: summary(tracks: [t])).first?.name, "Inst 3")
+    }
+
+    func testQueryFromTextFoldsAndResolvesPluginNames() {
+        let q = TrackSearchQuery(text: "  SWÉLL  pro-q ") { $0 == "pro-q" ? ["aufx/FQ3p/FabF"] : [] }
+        XCTAssertEqual(q.terms, ["swell", "pro-q"])
+        XCTAssertEqual(q.pluginFingerprints, [[], ["aufx/FQ3p/FabF"]])
+        XCTAssertTrue(TrackSearchQuery(text: "   ").isEmpty)
+    }
+}
+
+final class TrackSearchDatabaseTests: XCTestCase {
+    private func dbURL() throws -> URL { try Fixture.tempDir().appendingPathComponent("library.sqlite") }
+
+    private func track(_ pos: Int, _ name: String, object: String? = nil, channel: String = "Audio 1", kind: TrackKind = .audio,
+                       hidden: Bool = false, fx: [AURef] = []) -> Track {
+        Track(name: channel, userName: name, kind: kind, offset: pos, isActive: true, audioFx: fx, position: pos, objectName: object ?? name, isHidden: hidden)
+    }
+
+    private func project(_ path: String, _ tracks: [Track]) -> ProjectSummary {
+        ProjectSummary(path: path, fingerprints: [], tracks: tracks, metadata: ProjectMetadata(),
+                       stats: BundleStats(sizeBytes: 0, createdAt: 0, modifiedAt: 0), projectDataMTime: 1, projectDataSize: 1)
+    }
+
+    private func search(_ db: SummaryDatabase, _ text: String, limit: Int = 100, fps: @escaping (String) -> [String] = { _ in [] }) async throws -> TrackSearchResult {
+        try await db.searchTracks(TrackSearchQuery(text: text, fingerprints: fps), limit: limit)
+    }
+
+    private func library() async throws -> SummaryDatabase {
+        let db = try SummaryDatabase(url: try dbURL())
+        try await db.upsert([
+            project("/m/Summer Anthem.logicx", [track(1, "Kick"), track(2, "Swell Strings", object: "Strings Object", channel: "Inst 3", kind: .instrument),
+                                                track(3, "Lead Vox", hidden: true)]),
+            project("/m/Winter Mix.logicx", [track(1, "Kick"), track(2, "Vocal swell up", object: "Vox Object"), track(3, "Café Pad")]),
+        ])
+        return db
+    }
+
+    func testPartialCaseInsensitiveMatchOnTrackNameAcrossProjects() async throws {
+        let r = try await search(try await library(), "SWELL")
+        XCTAssertEqual(r.hits.map { "\($0.path.split(separator: "/").last!)#\($0.position)" }, ["Summer Anthem.logicx#2", "Winter Mix.logicx#2"])
+        XCTAssertEqual(r.total, 2)
+        let hit = try XCTUnwrap(r.hits.first)
+        XCTAssertEqual(hit.name, "Swell Strings"); XCTAssertEqual(hit.objectName, "Strings Object")
+        XCTAssertEqual(hit.channel, "Inst 3"); XCTAssertEqual(hit.kind, .instrument); XCTAssertFalse(hit.isHidden)
+    }
+
+    func testObjectNameAndChannelAreSearchable() async throws {
+        let db = try await library()
+        let byObject = try await search(db, "vox object")
+        XCTAssertEqual(byObject.hits.map(\.name), ["Vocal swell up"])
+        let byChannel = try await search(db, "inst 3")
+        XCTAssertEqual(byChannel.hits.map(\.name), ["Swell Strings"])
+    }
+
+    func testAllTermsMustMatchTheSameTrack() async throws {
+        let db = try await library()
+        let both = try await search(db, "swell strings")
+        XCTAssertEqual(both.hits.map(\.name), ["Swell Strings"])
+        let none = try await search(db, "swell kick")
+        XCTAssertTrue(none.hits.isEmpty)
+    }
+
+    func testFoldedMatchingIgnoresCaseAndAccents() async throws {
+        let r = try await search(try await library(), "CAFE")
+        XCTAssertEqual(r.hits.map(\.name), ["Café Pad"])
+    }
+
+    func testHiddenTracksAreFoundAndFlagged() async throws {
+        let r = try await search(try await library(), "lead")
+        XCTAssertEqual(r.hits.map(\.isHidden), [true])
+    }
+
+    func testProjectNameAloneDoesNotListEveryTrackButHelpsNarrow() async throws {
+        let db = try await library()
+        let onlyProject = try await search(db, "summer")
+        XCTAssertTrue(onlyProject.hits.isEmpty, "a project-name match is a project result, not 3 track rows")
+        let narrowed = try await search(db, "summer kick")
+        XCTAssertEqual(narrowed.hits.map { $0.path.split(separator: "/").last! }, ["Summer Anthem.logicx"])
+        XCTAssertEqual(narrowed.hits.map(\.name), ["Kick"])
+    }
+
+    func testPluginsAreFoundByNameThroughTheRegistryFingerprints() async throws {
+        let db = try SummaryDatabase(url: try dbURL())
+        let eq = AURef(typeCode: "aufx", subtype: "FQ3p", manufacturer: "FabF", offset: 0)
+        try await db.upsert([project("/m/P.logicx", [track(1, "Guitar", fx: [eq]), track(2, "Bass")])])
+        let r = try await search(db, "pro-q") { $0 == "pro-q" ? ["aufx/FQ3p/FabF"] : [] }
+        XCTAssertEqual(r.hits.map(\.name), ["Guitar"])
+        XCTAssertEqual(r.hits.first?.pluginFingerprints, ["aufx/FQ3p/FabF"])
+    }
+
+    func testPluginsNamedByTheFileAreFoundInTheText() async throws {
+        let db = try SummaryDatabase(url: try dbURL())
+        let stock = AURef(typeCode: "aufx", subtype: "chan", manufacturer: "appl", offset: 0, displayName: "Channel EQ")
+        try await db.upsert([project("/m/P.logicx", [track(1, "Guitar", fx: [stock]), track(2, "Bass")])])
+        let r = try await search(db, "channel eq")
+        XCTAssertEqual(r.hits.map(\.name), ["Guitar"])
+    }
+
+    func testWildcardCharactersAreLiteral() async throws {
+        let db = try SummaryDatabase(url: try dbURL())
+        try await db.upsert([project("/m/P.logicx", [track(1, "100% wet"), track(2, "under_score"), track(3, "plain"), track(4, "it's \"quoted\"")])])
+        let percent = try await search(db, "%"), under = try await search(db, "_"), quote = try await search(db, "'s")
+        XCTAssertEqual(percent.hits.map(\.name), ["100% wet"])
+        XCTAssertEqual(under.hits.map(\.name), ["under_score"])
+        XCTAssertEqual(quote.hits.map(\.name), ["it's \"quoted\""])
+    }
+
+    func testReparsingReplacesTheRowsAndRemovalDeletesThem() async throws {
+        let db = try await library()
+        try await db.upsert([project("/m/Summer Anthem.logicx", [track(1, "Kick"), track(2, "Renamed Strings")])])
+        let old = try await search(db, "swell")
+        XCTAssertEqual(old.hits.map { $0.path.split(separator: "/").last! }, ["Winter Mix.logicx"])
+        let renamed = try await search(db, "renamed")
+        XCTAssertEqual(renamed.hits.count, 1)
+        try await db.remove(paths: ["/m/Winter Mix.logicx"])
+        let after = try await search(db, "swell")
+        XCTAssertTrue(after.hits.isEmpty)
+    }
+
+    func testLimitCutsTheListButTotalCountsEverything() async throws {
+        let db = try SummaryDatabase(url: try dbURL())
+        try await db.upsert([project("/m/P.logicx", (1...30).map { track($0, "Pad \($0)") })])
+        let r = try await search(db, "pad", limit: 10)
+        XCTAssertEqual(r.hits.count, 10)
+        XCTAssertEqual(r.total, 30)
+    }
+
+    func testResultsAreOrderedByProjectNameNaturallyThenPosition() async throws {
+        let db = try SummaryDatabase(url: try dbURL())
+        try await db.upsert([project("/m/Song 10.logicx", [track(2, "Pad B"), track(1, "Pad A")]), project("/m/Song 2.logicx", [track(1, "Pad C")])])
+        let r = try await search(db, "pad")
+        XCTAssertEqual(r.hits.map(\.name), ["Pad C", "Pad A", "Pad B"])
+    }
+
+    func testEmptyQueryFindsNothing() async throws {
+        let r = try await search(try await library(), "   ")
+        XCTAssertTrue(r.hits.isEmpty); XCTAssertEqual(r.total, 0)
+    }
+}

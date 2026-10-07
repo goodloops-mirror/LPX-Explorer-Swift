@@ -47,6 +47,13 @@ if let dbPath = args.firstIndex(of: "--db").flatMap({ $0 + 1 < args.count ? args
     await LibraryScanner.scan(bundles: bundles, workers: LibraryScanner.defaultWorkerCount(), known: known, onOutcome: c.add)
     try await db.upsert(c.parsed)
     let total = try await db.count()
+    if let q = args.firstIndex(of: "--search").flatMap({ $0 + 1 < args.count ? args[$0 + 1] : nil }) {
+        // Time a library-wide track search against the database that was just updated.
+        let t0 = Date()
+        let r = try await db.searchTracks(TrackSearchQuery(text: q), limit: 500)
+        print(String(format: "search '%@': %d tracks in %d shown, %.1f ms", q, r.total, r.hits.count, Date().timeIntervalSince(t0) * 1000))
+        for h in r.hits.prefix(8) { print("  \(URL(fileURLWithPath: h.path).lastPathComponent) #\(h.position) \(h.name)\(h.isHidden ? " [hidden]" : "")") }
+    }
     print(String(format: "db scan: %d bundles, %d re-parsed, %d unchanged, %d failed; db now holds %d; %.0f ms", bundles.count, c.parsed.count, c.unchanged, c.failed, total, Date().timeIntervalSince(t) * 1000))
     exit(0)
 }

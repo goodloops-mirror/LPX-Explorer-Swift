@@ -53,7 +53,7 @@ struct PluginRailView: View {
             }
         }
         .navigationTitle("Plug-ins")
-        .navigationSplitViewColumnWidth(min: 300, ideal: 380)
+        .navigationSplitViewColumnWidth(min: 300, ideal: 750)
     }
 
     private func countLine(shown: Int, total: Int, categorised: Int) -> String {

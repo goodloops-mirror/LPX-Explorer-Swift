@@ -52,6 +52,7 @@ The app makes **no network requests**: no updater, no analytics, no web search. 
 
 Storage is `SummaryDatabase` (SQLite via the system `sqlite3`, `~/Library/Application Support/LpxExplorer/library.sqlite`, WAL):
 - `entries` — a small `ProjectListEntry` per project (metadata, unique plug-ins with counts, track count, folded search text). Loaded in the background at launch (~0.3 s for 3,000 projects) and held in memory for the list, search, filters, verdicts and the plug-in view.
+- `tracks` — one searchable row per arrangement track (folded name/object/channel/stock-plug-in text + plug-in fingerprints), rewritten with each project; powers the library-wide track search (`SummaryDatabase.searchTracks`, `lpx-scan --db <sqlite> --search <text>`). Bump `schemaVersion` when its columns change.
 - `details` — the full `ProjectSummary` (tracks, alternatives, …), loaded only when a project is selected (~2 ms).
 - Writes are incremental: only projects parsed in the last batch are upserted. Bump `SummaryDatabase.parserVersion` whenever parser output changes (rows are then dropped and re-derived).
 - Always bind SQLite text/blobs with `SQLITE_TRANSIENT` (Swift's temporary buffers don't outlive the call).
