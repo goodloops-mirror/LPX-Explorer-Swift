@@ -32,6 +32,28 @@ if args.contains("--profile") {
     for (k, v) in t.sorted(by: { $0.key < $1.key }) { print(String(format: "%-34@ %8.1f ms  (%.2f ms/MB)", k as NSString, v * 1000, v * 1000 / (Double(bytes) / 1e6))) }
     exit(0)
 }
+if args.contains("--bounces") {
+    // Read-only: list the projects under the folder (names only, nothing is opened) and show which bounces the finder matches.
+    let root = URL(fileURLWithPath: args[1])
+    let bundles = try LogicxDiscovery.discover(in: root)
+    let cache = BounceListingCache()
+    var withMix = 0, withStems = 0, without: [String] = []
+    let verbose = args.contains("--verbose")
+    for b in bundles {
+        let found = BounceFinder.find(project: b, libraryRoot: root, cache: cache)
+        let mixes = found.filter { $0.kind == .mix }, stems = found.filter { $0.kind == .stem }
+        if !mixes.isEmpty { withMix += 1 }
+        if !stems.isEmpty { withStems += 1 }
+        if found.isEmpty { without.append(b.lastPathComponent) }
+        if args.contains("--paths") { for f in found { print("MATCHED\t\(f.path)") } }
+        if verbose {
+            print("\(b.lastPathComponent): \(mixes.count) mix, \(stems.count) stems" + (mixes.first.map { " — main: \($0.fileName)" } ?? ""))
+        }
+    }
+    print("\(bundles.count) projects: \(withMix) with a mix, \(withStems) with stems, \(without.count) without any bounce")
+    for n in without.prefix(15) { print("  none: \(n)") }
+    exit(0)
+}
 if let dbPath = args.firstIndex(of: "--db").flatMap({ $0 + 1 < args.count ? args[$0 + 1] : nil }) {
     // Incremental scan against a SQLite library: unchanged projects are skipped via their stamps.
     let db = try SummaryDatabase(url: URL(fileURLWithPath: dbPath))

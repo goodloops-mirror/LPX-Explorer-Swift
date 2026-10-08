@@ -7,7 +7,7 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 ## [Unreleased]
 
 ### Added
-- Bounces: the app finds each project's bounce by name — the project name (with its version number) followed by anything of `MIX ALL`, an SMPTE timestamp, or `STM#nn` for stem nn — in a `Bounces` folder next to the project (all subfolders) or inside the package. The project detail shows the mix prominently with its stems below, the project list marks projects that have a bounce, and a "Bounce: any / Has bounce / No bounce" filter sits next to the search fields. Lookups are cached and re-checked in the background after every scan.
+- Bounces: the app finds each project's bounce by name — the project name (with its version number) followed by `MIX ALL`, a timestamp (`@09595923` or SMPTE) or `[… ALT n]` for a mix, or `STM#nn LABEL` for stem nn (e.g. `STM#01 PIANO`) — in a `Bounces` folder in the project's folder or any folder above it up to the library folder (so projects in `Backups` find the `Bounces` next to `Backups`), including all subfolders, or inside the package. When copies exist the main mix is the one outside `_OLD`-style folders, lossless, and newest; stems show their labels. The project detail shows the mix prominently with its stems below, the project list marks projects that have a bounce, and a "Bounce: any / Has bounce / No bounce" filter sits next to the search fields. Lookups are cached and re-checked in the background after every scan.
 - A player at the bottom of the window: play / pause, the waveform with a playhead (click or drag to jump), times, and "back to the project" the playback was started from. It keeps playing while you browse.
 
 ### Added

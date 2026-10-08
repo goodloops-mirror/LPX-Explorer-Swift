@@ -324,6 +324,7 @@ final class LibraryModel {
         bounceTask?.cancel()
         let projects = Array(entries.keys)
         let known = bounces
+        let roots = folders.filter { $0 != Self.pluginsID }
         guard !projects.isEmpty else { return }
         bounceTask = Task { [weak self] in
             let found = await Task.detached(priority: .utility) { () -> [String: [BounceFile]] in
@@ -333,7 +334,9 @@ final class LibraryModel {
                 DispatchQueue.concurrentPerform(iterations: projects.count) { i in
                     let path = projects[i]
                     guard !Task.isCancelled, FileManager.default.fileExists(atPath: path) else { return }
-                    let files = BounceFinder.find(project: URL(fileURLWithPath: path), cache: cache)
+                    // The library folder the project lives in bounds how far up its Bounces folders are looked for.
+                    let root = roots.filter { path.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") }.max { $0.count < $1.count }
+                    let files = BounceFinder.find(project: URL(fileURLWithPath: path), libraryRoot: root.map { URL(fileURLWithPath: $0) }, cache: cache)
                     lock.lock(); out[path] = files; lock.unlock()
                 }
                 return out

@@ -156,7 +156,7 @@ public actor SummaryDatabase {
                 try run("DELETE FROM details WHERE path = ?", [.text(p)])
                 try run("DELETE FROM tracks WHERE path = ?", [.text(p)])
                 try run("DELETE FROM failures WHERE path = ?", [.text(p)])
-                try run("DELETE FROM bounces WHERE project_path = ?", [.text(p)])
+                try run("DELETE FROM bounce_files WHERE project_path = ?", [.text(p)])
             }
             try exec("COMMIT")
         } catch {
@@ -283,11 +283,12 @@ public actor SummaryDatabase {
         try exec("BEGIN IMMEDIATE")
         do {
             for (project, files) in byProject {
-                try run("DELETE FROM bounces WHERE project_path = ?", [.text(project)])
+                try run("DELETE FROM bounce_files WHERE project_path = ?", [.text(project)])
                 for (i, f) in files.enumerated() {
-                    try run("INSERT INTO bounces(project_path, ord, file_path, file_name, kind, stem, size, mtime) VALUES (?,?,?,?,?,?,?,?)",
+                    try run("INSERT INTO bounce_files(project_path, ord, file_path, file_name, kind, stem, stem_label, alternative, size, mtime) VALUES (?,?,?,?,?,?,?,?,?,?)",
                             [.text(project), .int(Int64(i)), .text(f.path), .text(f.fileName), .text(f.kind.rawValue),
-                             f.stemNumber.map { Bind.int(Int64($0)) } ?? .null, .int(Int64(bitPattern: f.sizeBytes)), .int(f.mtimeUnix)])
+                             f.stemNumber.map { Bind.int(Int64($0)) } ?? .null, f.stemLabel.map { Bind.text($0) } ?? .null,
+                             .int(f.isAlternative ? 1 : 0), .int(Int64(bitPattern: f.sizeBytes)), .int(f.mtimeUnix)])
                 }
             }
             try exec("COMMIT")
@@ -300,11 +301,13 @@ public actor SummaryDatabase {
     /// Every remembered bounce, by project path.
     public func bounces() throws -> [String: [BounceFile]] {
         var out: [String: [BounceFile]] = [:]
-        try query("SELECT project_path, file_path, file_name, kind, stem, size, mtime FROM bounces ORDER BY project_path, ord") { stmt in
+        try query("SELECT project_path, file_path, file_name, kind, stem, stem_label, alternative, size, mtime FROM bounce_files ORDER BY project_path, ord") { stmt in
             let stem: Int? = sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(stmt, 4))
+            let label: String? = sqlite3_column_type(stmt, 5) == SQLITE_NULL ? nil : text(stmt, 5)
             out[text(stmt, 0), default: []].append(BounceFile(
                 path: text(stmt, 1), fileName: text(stmt, 2), kind: BounceKind(rawValue: text(stmt, 3)) ?? .mix, stemNumber: stem,
-                sizeBytes: UInt64(bitPattern: sqlite3_column_int64(stmt, 5)), mtimeUnix: sqlite3_column_int64(stmt, 6)))
+                stemLabel: label, isAlternative: sqlite3_column_int64(stmt, 6) != 0,
+                sizeBytes: UInt64(bitPattern: sqlite3_column_int64(stmt, 7)), mtimeUnix: sqlite3_column_int64(stmt, 8)))
         }
         return out
     }
@@ -349,8 +352,9 @@ public actor SummaryDatabase {
             CREATE TABLE IF NOT EXISTS tracks(id INTEGER PRIMARY KEY, path TEXT NOT NULL, position INTEGER, track_offset INTEGER NOT NULL, kind TEXT NOT NULL, hidden INTEGER NOT NULL,
                 name TEXT NOT NULL, object_name TEXT NOT NULL, channel TEXT NOT NULL, text TEXT NOT NULL, plugin_text TEXT NOT NULL, fingerprints TEXT NOT NULL, project_text TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS failures(path TEXT PRIMARY KEY, pd_mtime INTEGER NOT NULL, pd_size INTEGER NOT NULL, message TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS bounces(project_path TEXT NOT NULL, ord INTEGER NOT NULL, file_path TEXT NOT NULL, file_name TEXT NOT NULL, kind TEXT NOT NULL, stem INTEGER, size INTEGER NOT NULL, mtime INTEGER NOT NULL);
-            CREATE INDEX IF NOT EXISTS bounces_project ON bounces(project_path);
+            DROP TABLE IF EXISTS bounces;
+            CREATE TABLE IF NOT EXISTS bounce_files(project_path TEXT NOT NULL, ord INTEGER NOT NULL, file_path TEXT NOT NULL, file_name TEXT NOT NULL, kind TEXT NOT NULL, stem INTEGER, stem_label TEXT, alternative INTEGER NOT NULL, size INTEGER NOT NULL, mtime INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS bounce_files_project ON bounce_files(project_path);
             CREATE INDEX IF NOT EXISTS tracks_path ON tracks(path);
             """)
         // Stale parser output (or schema) ⇒ drop every row; they are re-derived by the next scan.
