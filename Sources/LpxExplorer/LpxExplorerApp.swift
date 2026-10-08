@@ -6,6 +6,9 @@ struct LpxExplorerApp: App {
     @State private var registry: AuRegistry
     @State private var model: LibraryModel
     @State private var player = AudioPlayerModel()
+    @State private var spaceBar = SpaceBarPlayback()
+    /// Shared with the project detail's toolbar toggle; four panes need a wider minimum window than three.
+    @AppStorage("showTracksPane") private var showTracksPane = true
     @Environment(\.openWindow) private var openWindow
 
     init() {
@@ -23,10 +26,11 @@ struct LpxExplorerApp: App {
                 .environment(model)
                 .environment(registry)
                 .environment(player)
-                .frame(minWidth: 900, minHeight: 560)
+                .frame(minWidth: showTracksPane ? 1100 : 900, minHeight: 560)
                 .task {
                     if registry.needsScan { registry.refresh() }
                     model.start()
+                    spaceBar.install(player: player)
                 }
         }
         .defaultSize(width: 1500, height: 860)

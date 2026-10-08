@@ -6,6 +6,10 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+### Added
+- Space bar plays / pauses the player (not while typing in a text field).
+- The project detail is split into two panes: details with the bounces right below them, and the tracks in a pane of their own. The tracks pane has a toolbar toggle; hiding it is remembered. The list column is narrower by default (450 pt) to make room.
+
 ### Fixed
 - The search fields above the project list keep their focus when the first letter switches the list to the results (the field bar is no longer rebuilt with the swapped view).
 - The player is a strip of its own at the bottom of the window instead of an overlay on the content.

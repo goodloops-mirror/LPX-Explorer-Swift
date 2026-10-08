@@ -78,7 +78,7 @@ struct SidebarView: View {
                 }
             }
         }
-        .navigationSplitViewColumnWidth(min: 160, ideal: 225)
+        .navigationSplitViewColumnWidth(min: 160, ideal: 200)
         .toolbar {
             ToolbarItem { Button { model.chooseFolder() } label: { Label("Add Folder", systemImage: "folder.badge.plus") } }
         }
@@ -115,7 +115,7 @@ struct ProjectListView: View {
             }
         }
         .navigationTitle(model.selectedFolder.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Projects")
-        .navigationSplitViewColumnWidth(min: 260, ideal: 750)
+        .navigationSplitViewColumnWidth(min: 260, ideal: 450)
         .overlay {
             if model.selectedFolder != nil, paths.isEmpty, !model.isScanning {
                 if model.query.isEmpty && (model.similarityFilter != nil || model.onlyMissingPlugins) {
@@ -318,7 +318,7 @@ struct SearchResultsView: View {
         }
         .navigationTitle("Search")
         .navigationSubtitle("\(model.results.count) project\(model.results.count == 1 ? "" : "s") · \(model.totalMatchingTracks) track\(model.totalMatchingTracks == 1 ? "" : "s")")
-        .navigationSplitViewColumnWidth(min: 300, ideal: 750)
+        .navigationSplitViewColumnWidth(min: 300, ideal: 450)
         .overlay {
             if model.results.isEmpty && !model.isScanning {
                 ContentUnavailableView.search(text: model.query)

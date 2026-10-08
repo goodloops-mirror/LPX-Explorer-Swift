@@ -164,10 +164,45 @@ struct ProjectDetailView: View {
         }
     }
 
+    /// Third pane: the project's details with its bounces right below them; fourth pane (can be hidden): the tracks.
+    @AppStorage("showTracksPane") private var showTracksPane = true
+
     var body: some View {
-        let m = summary.metadata
+        HSplitView {
+            infoPane.frame(minWidth: 320, idealWidth: 360, maxWidth: .infinity)
+            if showTracksPane {
+                tracksPane.frame(minWidth: 300, idealWidth: 480, maxWidth: .infinity)
+            }
+        }
+        .task(id: base.path) { variantSummary = nil; variantError = nil }
+        // Opening a search result shows its track, so make sure the tracks pane is there.
+        .onChange(of: model.focusedTrack?.offset) { _, new in if new != nil { showTracksPane = true } }
+        .navigationTitle(LibraryModel.projectName(summary.path))
+        .navigationSubtitle(url.deletingLastPathComponent().path)
+        .toolbar {
+            ToolbarItem {
+                Toggle(isOn: $showTracksPane) { Label("Tracks", systemImage: "list.number") }
+                    .help(showTracksPane ? "Hide the tracks pane" : "Show the tracks pane")
+            }
+            ToolbarItem {
+                // Reveal only: this app never opens (or launches Logic with) a project.
+                Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: { Label("Reveal in Finder", systemImage: "folder") }
+                    .help("Reveal this project in Finder")
+            }
+        }
+    }
+
+    private var tracksPane: some View {
         ScrollViewReader { proxy in
-        Form {
+            Form { tracksSection }
+                .formStyle(.grouped)
+                .task(id: model.focusedTrack?.offset) { scrollToFocusedTrack(proxy) }
+        }
+    }
+
+    private var infoPane: some View {
+        let m = summary.metadata
+        return Form {
             Section { CompatibilityBand(summary: summary) }
             if let image = summary.alternatives.first(where: { $0.index == selectedVariant })?.windowImagePath {
                 Section {
@@ -209,7 +244,7 @@ struct ProjectDetailView: View {
             if !ProjectBundle.hasInformationPlist(url) {
                 Section { Label("This project has no ProjectInformation.plist; Logic may refuse to open it.", systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
             }
-            tracksSection
+            BouncesSection(projectPath: summary.path)
             if groups.isEmpty {
                 Section("Plug-ins") { Text("No plug-ins found").foregroundStyle(.secondary) }
             }
@@ -224,22 +259,9 @@ struct ProjectDetailView: View {
                     }
                 }
             }
-            BouncesSection(projectPath: summary.path)
             AudioSection(bundlePath: summary.path)
         }
         .formStyle(.grouped)
-        .task(id: base.path) { variantSummary = nil; variantError = nil }
-        .task(id: model.focusedTrack?.offset) { scrollToFocusedTrack(proxy) }
-        .navigationTitle(LibraryModel.projectName(summary.path))
-        .navigationSubtitle(url.deletingLastPathComponent().path)
-        .toolbar {
-            ToolbarItem {
-                // Reveal only: this app never opens (or launches Logic with) a project.
-                Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: { Label("Reveal in Finder", systemImage: "folder") }
-                    .help("Reveal this project in Finder")
-            }
-        }
-        }
     }
 }
 
