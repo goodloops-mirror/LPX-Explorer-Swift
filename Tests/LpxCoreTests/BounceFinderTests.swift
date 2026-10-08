@@ -114,35 +114,28 @@ final class BounceFinderTests: XCTestCase {
         XCTAssertEqual(names(BounceFinder.find(project: project)), ["Song v1.wav"])
     }
 
-    // MARK: choosing the main mix
+    // MARK: several matches
 
-    func testMainMixIsNotAnArchivedLossyOrAlternativeCopy() throws {
+    func testNewestMixComesFirstAndEveryStemIsListed() throws {
         let dir = try Fixture.tempDir()
         let project = try Fixture.logicx(in: dir, name: "Song v1.logicx")
-        let newer = Date(timeIntervalSince1970: 5_000), older = Date(timeIntervalSince1970: 1_000)
-        try touch(dir.appendingPathComponent("Bounces/Song v1 @10000001/Song v1 MIX ALL @10000001.wav"), modified: older)          // the real one
-        try touch(dir.appendingPathComponent("Bounces/_OLD/Song v1 MIX ALL @10000001.wav"), modified: newer)                  // archived copy, newer
-        try touch(dir.appendingPathComponent("Bounces/_OLD/mp3/Song v1 MIX ALL @10000001.mp3"), modified: newer)
-        try touch(dir.appendingPathComponent("Bounces/Song v1 @10000001/Song v1 MIX ALL @10000001 [30 SECS ALT 1].wav"), modified: newer)
+        try touch(dir.appendingPathComponent("Bounces/Song v1/Song v1 MIX ALL.wav"), modified: Date(timeIntervalSince1970: 1_000))
+        try touch(dir.appendingPathComponent("Bounces/Song v1/Song v1 [Calm] MIX ALL.wav"), modified: Date(timeIntervalSince1970: 5_000))
+        try touch(dir.appendingPathComponent("Bounces/Song v1/Song v1 STM#02 BASS.wav"))
+        try touch(dir.appendingPathComponent("Bounces/Song v1/Song v1 STM#01 PIANO.wav"))
+        try touch(dir.appendingPathComponent("Bounces/Old/Song v1 STM#01 PIANO.wav"))
 
         let found = BounceFinder.find(project: project)
 
-        XCTAssertEqual(found.map(\.path).first, dir.appendingPathComponent("Bounces/Song v1 @10000001/Song v1 MIX ALL @10000001.wav").path)
-        XCTAssertEqual(found.count, 4, "the others are still listed after it")
-        XCTAssertEqual(found.map(\.fileName), ["Song v1 MIX ALL @10000001.wav", "Song v1 MIX ALL @10000001.wav", "Song v1 MIX ALL @10000001.mp3",
-                                               "Song v1 MIX ALL @10000001 [30 SECS ALT 1].wav"],
-                       "main mix, its archived copy, the archived mp3, and last the shorter alternate cut")
-        XCTAssertEqual(found.first(where: { $0.fileName.contains("ALT 1") })?.isAlternative, true)
+        XCTAssertEqual(names(found).prefix(2), ["Song v1 [Calm] MIX ALL.wav", "Song v1 MIX ALL.wav"], "the newest mix is the main one")
+        XCTAssertEqual(found.compactMap(\.stemNumber), [1, 1, 2], "stems by number; nothing is hidden")
     }
 
-    func testOneEntryPerStemNumberTheBestCopyWins() throws {
+    func testTheCadmusCase() throws {
         let dir = try Fixture.tempDir()
-        let project = try Fixture.logicx(in: dir, name: "Song v1.logicx")
-        try touch(dir.appendingPathComponent("Bounces/Song v1/Song v1 STM#01 PIANO.wav"), modified: Date(timeIntervalSince1970: 1_000))
-        try touch(dir.appendingPathComponent("Bounces/_OLD/Song v1 STM#01 PIANO.wav"), modified: Date(timeIntervalSince1970: 9_000))
-        try touch(dir.appendingPathComponent("Bounces/Song v1/Song v1 STM#02 BASS.wav"))
-        let found = BounceFinder.find(project: project)
-        XCTAssertEqual(found.compactMap(\.stemNumber), [1, 2])
-        XCTAssertEqual(found.first?.path, dir.appendingPathComponent("Bounces/Song v1/Song v1 STM#01 PIANO.wav").path)
+        let themes = dir.appendingPathComponent("Alea Aquarius - Themes")
+        let project = try Fixture.logicx(in: themes, name: "AQU Cadmus v10.logicx")
+        try touch(themes.appendingPathComponent("Bounces/AQU Cadmus v10/AQU Cadmus v10 [Calm] MIX ALL.wav"))
+        XCTAssertEqual(names(BounceFinder.find(project: project, libraryRoot: dir)), ["AQU Cadmus v10 [Calm] MIX ALL.wav"])
     }
 }

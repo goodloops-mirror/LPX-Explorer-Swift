@@ -200,15 +200,14 @@ final class SummaryDatabaseTests: XCTestCase {
         XCTAssertNil(cleared["/m/A.logicx"])
     }
 
-    func testStemLabelsAndAlternativeFlagsSurviveTheCache() async throws {
+    func testStemLabelsSurviveTheCache() async throws {
         let db = try SummaryDatabase(url: try dbURL())
         let stem = BounceFile(path: "/b/A STM#03 STRINGS 1.wav", fileName: "A STM#03 STRINGS 1.wav", kind: .stem, stemNumber: 3, stemLabel: "STRINGS 1",
-                              isAlternative: false, sizeBytes: 5, mtimeUnix: 6)
-        let alt = BounceFile(path: "/b/A MIX ALL [30 SECS ALT 1].wav", fileName: "A MIX ALL [30 SECS ALT 1].wav", kind: .mix, stemNumber: nil, stemLabel: nil,
-                             isAlternative: true, sizeBytes: 7, mtimeUnix: 8)
-        try await db.saveBounces(["/m/A.logicx": [alt, stem]])
+                              sizeBytes: 5, mtimeUnix: 6)
+        let mix = BounceFile(path: "/b/A [Calm] MIX ALL.wav", fileName: "A [Calm] MIX ALL.wav", kind: .mix, stemNumber: nil, stemLabel: nil, sizeBytes: 7, mtimeUnix: 8)
+        try await db.saveBounces(["/m/A.logicx": [mix, stem]])
         let all = try await db.bounces()
-        XCTAssertEqual(all["/m/A.logicx"], [alt, stem])
+        XCTAssertEqual(all["/m/A.logicx"], [mix, stem])
     }
 
     func testRemovingAProjectForgetsItsBounces() async throws {

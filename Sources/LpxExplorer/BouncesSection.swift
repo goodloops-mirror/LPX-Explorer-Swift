@@ -49,7 +49,7 @@ struct BouncesSection: View {
             }.buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 2) {
                 Text(f.fileName).font(primary ? .headline : .body).fixedSize(horizontal: false, vertical: true)
-                Text((f.isAlternative ? "Alternate cut · " : "") + detail(f)).font(.caption).foregroundStyle(.secondary)
+                Text(detail(f)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
         }

@@ -7,14 +7,12 @@ public struct BounceFile: Equatable, Sendable, Codable {
     public var stemNumber: Int?
     /// The stem's own name ("PIANO"), when the file has one.
     public var stemLabel: String?
-    /// A mix variant ("MIX ALL [30 SECS ALT 1]"), never the main mix.
-    public var isAlternative: Bool
     public var sizeBytes: UInt64
     public var mtimeUnix: Int64
-    public init(path: String, fileName: String, kind: BounceKind, stemNumber: Int?, stemLabel: String? = nil, isAlternative: Bool = false,
+    public init(path: String, fileName: String, kind: BounceKind, stemNumber: Int?, stemLabel: String? = nil,
                 sizeBytes: UInt64, mtimeUnix: Int64) {
         self.path = path; self.fileName = fileName; self.kind = kind; self.stemNumber = stemNumber
-        self.stemLabel = stemLabel; self.isAlternative = isAlternative
+        self.stemLabel = stemLabel
         self.sizeBytes = sizeBytes; self.mtimeUnix = mtimeUnix
     }
 }
@@ -65,39 +63,21 @@ public enum BounceFinder {
         }
         folders += parents.map { $0.appendingPathComponent("Bounces") }
 
-        struct Candidate { var file: BounceFile; var archived: Bool; var lossy: Bool }
         var seen = Set<String>()
-        var candidates: [Candidate] = []
+        var found: [BounceFile] = []
         for folder in folders {
-            let base = folder.pathComponents.count
             for entry in cache.audioFiles(under: folder) where seen.insert(entry.url.path).inserted {
                 guard let match = BounceNaming.match(fileName: entry.url.lastPathComponent, projectName: name) else { continue }
-                // A folder such as `_OLD` below Bounces marks an archived copy.
-                let between = entry.url.pathComponents.dropFirst(base).dropLast()
-                candidates.append(Candidate(
-                    file: BounceFile(path: entry.url.path, fileName: entry.url.lastPathComponent, kind: match.kind, stemNumber: match.stemNumber,
-                                     stemLabel: match.stemLabel, isAlternative: match.isAlternative, sizeBytes: entry.size, mtimeUnix: entry.mtime),
-                    archived: between.contains { $0.hasPrefix("_") },
-                    lossy: BounceNaming.lossyExtensions.contains(entry.url.pathExtension.lowercased())))
+                found.append(BounceFile(path: entry.url.path, fileName: entry.url.lastPathComponent, kind: match.kind, stemNumber: match.stemNumber,
+                                        stemLabel: match.stemLabel, sizeBytes: entry.size, mtimeUnix: entry.mtime))
             }
         }
-
-        // Best copy first: not archived, lossless, not a variant, newest.
-        func better(_ a: Candidate, _ b: Candidate) -> Bool {
-            if a.file.isAlternative != b.file.isAlternative { return !a.file.isAlternative }
-            if a.archived != b.archived { return !a.archived }
-            if a.lossy != b.lossy { return !a.lossy }
-            return a.file.mtimeUnix != b.file.mtimeUnix ? a.file.mtimeUnix > b.file.mtimeUnix : a.file.path < b.file.path
+        // The mix first (the newest one is the main one), then the stems in number order.
+        return found.sorted { a, b in
+            if a.kind != b.kind { return a.kind == .mix }
+            if a.kind == .stem, a.stemNumber != b.stemNumber { return (a.stemNumber ?? 0) < (b.stemNumber ?? 0) }
+            return a.mtimeUnix != b.mtimeUnix ? a.mtimeUnix > b.mtimeUnix : a.path < b.path
         }
-        let ranked = candidates.sorted(by: better)
-        let mixes = ranked.filter { $0.file.kind == .mix }.map(\.file)
-        // One entry per stem number: the best copy.
-        var stems: [Int: BounceFile] = [:]
-        for c in ranked where c.file.kind == .stem {
-            let number = c.file.stemNumber ?? 0
-            if stems[number] == nil { stems[number] = c.file }
-        }
-        return mixes + stems.sorted { $0.key < $1.key }.map(\.value)
     }
 
     /// Every audio file in `directory` and its subfolders (empty when it doesn't exist).
