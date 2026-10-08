@@ -6,6 +6,8 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-08
+
 ### Added
 - Bounces: a bounce belongs to a project when its file name starts with the project's name (version number included); whatever follows is ignored. A file with `STM#nn` after the name is stem nn (the text after it is the stem's label); every other match is a mix, the newest being the main one. They are looked up in `Bounces` folders in the project's folder and in every folder above it up to the library folder (so projects in `Backups` find the `Bounces` next to `Backups`), including all subfolders, and inside the package. The project detail shows the mix prominently with its stems below, the project list marks projects that have a bounce, and a "Bounce: any / Has bounce / No bounce" filter sits next to the search fields. Lookups are cached and re-checked in the background after every scan.
 - A player at the bottom of the window: play / pause, the waveform with a playhead (click or drag to jump), times, and "back to the project" the playback was started from. It keeps playing while you browse. The space bar plays / pauses (not while typing in a text field).
