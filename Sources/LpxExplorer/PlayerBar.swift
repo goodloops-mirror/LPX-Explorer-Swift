@@ -1,41 +1,46 @@
 import LpxCore
 import SwiftUI
 
-/// The player at the bottom of the window: play / pause, the waveform with a playhead (click or drag to jump), times, and a
-/// way back to the project the playback was started from. Shown only while something is loaded.
+/// The player at the bottom of the window: play / pause, the full file name, the waveform with a playhead (click or drag to
+/// jump), times, and a way back to the project the playback was started from. It is its own strip of the window (it never
+/// covers content) and appears only while something is loaded.
 struct PlayerBar: View {
     @Environment(LibraryModel.self) private var model
     @Environment(AudioPlayerModel.self) private var player
 
     var body: some View {
         if player.isActive {
-            HStack(spacing: 12) {
-                Button { player.togglePlayPause() } label: {
-                    Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 30))
-                }
-                .buttonStyle(.plain)
-                .help(player.isPlaying ? "Pause" : "Play")
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(player.title).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
-                    if let project = player.projectPath {
-                        Button { model.showProject(project) } label: {
-                            Label(LibraryModel.projectName(project), systemImage: "arrow.uturn.backward").lineLimit(1)
-                        }
-                        .buttonStyle(.link).font(.caption).help("Show the project this was started from")
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 12) {
+                    Button { player.togglePlayPause() } label: {
+                        Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 30))
                     }
+                    .buttonStyle(.plain)
+                    .help(player.isPlaying ? "Pause" : "Play")
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        // The whole file name, however long: it wraps instead of being cut off.
+                        Text(player.title).font(.callout.weight(.medium)).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let project = player.projectPath {
+                            Button { model.showProject(project) } label: {
+                                Label(LibraryModel.projectName(project), systemImage: "arrow.uturn.backward").multilineTextAlignment(.leading)
+                            }
+                            .buttonStyle(.link).font(.caption).help("Show the project this was started from")
+                        }
+                    }
+                    Spacer(minLength: 12)
+
+                    Text("\(clock(player.time)) / \(clock(player.duration))").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+
+                    Button { player.stop() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                        .buttonStyle(.plain).help("Close the player")
                 }
-                .frame(width: 220, alignment: .leading)
 
                 WaveformView(peaks: player.peaks, progress: player.duration > 0 ? player.time / player.duration : 0) { player.seek(fraction: $0) }
-                    .frame(height: 46)
-
-                Text("\(clock(player.time)) / \(clock(player.duration))").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-
-                Button { player.stop() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                    .buttonStyle(.plain).help("Close the player")
+                    .frame(height: 56)
             }
-            .padding(.horizontal, 14).padding(.vertical, 8)
+            .padding(.horizontal, 14).padding(.vertical, 10)
             .background(.bar)
             .overlay(alignment: .top) { Divider() }
         }

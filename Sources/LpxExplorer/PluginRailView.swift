@@ -80,7 +80,7 @@ struct PluginRowView: View {
         HStack(spacing: 8) {
             statusIcon
             VStack(alignment: .leading, spacing: 1) {
-                Text(row.name).lineLimit(1)
+                Text(row.name).fixedSize(horizontal: false, vertical: true)
                 Text(row.fineCategory.rawValue).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -139,7 +139,7 @@ struct PluginDetailView: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(LibraryModel.projectName(path))
                             Text(URL(fileURLWithPath: path).deletingLastPathComponent().path)
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }

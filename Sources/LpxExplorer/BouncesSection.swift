@@ -48,7 +48,7 @@ struct BouncesSection: View {
                 Image(systemName: isPlaying(f) ? "pause.circle.fill" : "play.circle.fill").font(primary ? .system(size: 34) : .title2)
             }.buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 2) {
-                Text(f.fileName).font(primary ? .headline : .body).lineLimit(1).truncationMode(.middle)
+                Text(f.fileName).font(primary ? .headline : .body).fixedSize(horizontal: false, vertical: true)
                 Text((f.isAlternative ? "Alternate cut · " : "") + detail(f)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -64,7 +64,10 @@ struct BouncesSection: View {
             Button { play(f) } label: { Image(systemName: isPlaying(f) ? "pause.fill" : "play.fill") }.buttonStyle(.borderless)
             Text(f.stemNumber.map { "STM#\(String(format: "%02d", $0))" } ?? "Stem")
                 .font(.body.monospaced()).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
-            Text(f.stemLabel ?? f.fileName).lineLimit(1).truncationMode(.middle).help(f.fileName)
+            VStack(alignment: .leading, spacing: 1) {
+                if let label = f.stemLabel { Text(label).fontWeight(.medium).fixedSize(horizontal: false, vertical: true) }
+                Text(f.fileName).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Spacer()
             Text(ByteCountFormatter.string(fromByteCount: Int64(f.sizeBytes), countStyle: .file)).font(.caption).foregroundStyle(.secondary)
         }

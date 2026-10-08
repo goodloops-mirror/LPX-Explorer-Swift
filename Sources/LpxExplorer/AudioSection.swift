@@ -41,7 +41,7 @@ struct AudioSection: View {
                     Image(systemName: isCurrent && player.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.title)
                 }.buttonStyle(.plain)
                 VStack(alignment: .leading) {
-                    Text(hero.fileName).lineLimit(1)
+                    Text(hero.fileName).fixedSize(horizontal: false, vertical: true)
                     Text("\(label(hero.category)) · best match for “what does this sound like?”").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -61,7 +61,7 @@ struct AudioSection: View {
                 Image(systemName: isCurrent && player.isPlaying ? "pause.fill" : "play.fill")
             }.buttonStyle(.borderless)
             Image(systemName: symbol(f.category)).foregroundStyle(.secondary).frame(width: 18)
-            Text(f.fileName).lineLimit(1).truncationMode(.middle)
+            Text(f.fileName).fixedSize(horizontal: false, vertical: true)
             Spacer()
             Text(f.durationSeconds.map { timeText(nil, of: $0) } ?? "—").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             Text(ByteCountFormatter.string(fromByteCount: Int64(f.sizeBytes), countStyle: .file))

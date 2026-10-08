@@ -96,7 +96,7 @@ struct ProjectDetailView: View {
                     Image(systemName: symbol(for: t.kind)).foregroundStyle(.secondary).frame(width: 20)
                     Text(channelLabel(t))
                         .font(.body.monospaced()).foregroundStyle(.secondary)
-                        .lineLimit(1).frame(width: 84, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true).frame(width: 84, alignment: .leading)
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(spacing: 6) {
                             Text(name.isEmpty ? "—" : name).foregroundStyle(name.isEmpty ? .tertiary : .primary)
@@ -106,10 +106,10 @@ struct ProjectDetailView: View {
                         }
                         // Several tracks can share one object; show it when the track is named differently.
                         if let object = t.objectName, object != name, t.kind != .folder {
-                            Text("Object: \(object)").font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                            Text("Object: \(object)").font(.caption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
                         }
                         let plugins = pluginLine(t)
-                        if !plugins.isEmpty { Text(plugins).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                        if !plugins.isEmpty { Text(plugins).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }

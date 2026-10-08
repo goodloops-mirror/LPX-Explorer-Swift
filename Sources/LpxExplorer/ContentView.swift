@@ -7,32 +7,36 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var model = model
-        NavigationSplitView {
-            SidebarView()
-        } content: {
-            if model.isPluginView { PluginRailView() } else { MiddlePane() }
-        } detail: {
-            if model.isPluginView {
-                if let fp = model.selectedPlugin, let row = model.pluginRows.first(where: { $0.fingerprint == fp }) {
-                    PluginDetailView(row: row).id(fp)
+        // The split view, the player and the scan banner are stacked: the player is a strip of its own, never an overlay.
+        VStack(spacing: 0) {
+            NavigationSplitView {
+                SidebarView()
+            } content: {
+                if model.isPluginView { PluginRailView() } else { MiddlePane() }
+            } detail: {
+                if model.isPluginView {
+                    if let fp = model.selectedPlugin, let row = model.pluginRows.first(where: { $0.fingerprint == fp }) {
+                        PluginDetailView(row: row).id(fp)
+                    } else {
+                        ContentUnavailableView("Select a plug-in", systemImage: "puzzlepiece.extension")
+                    }
+                } else if let path = model.selectedProject, model.entries[path] != nil {
+                    ProjectDetailLoader(path: path).id(path)
+                } else if let path = model.selectedProject, let message = model.errors[path] {
+                    ContentUnavailableView("Can't read this project", systemImage: "exclamationmark.triangle", description: Text(message))
                 } else {
-                    ContentUnavailableView("Select a plug-in", systemImage: "puzzlepiece.extension")
+                    ContentUnavailableView("Select a project", systemImage: "music.note.list")
                 }
-            } else if let path = model.selectedProject, model.entries[path] != nil {
-                ProjectDetailLoader(path: path).id(path)
-            } else if let path = model.selectedProject, let message = model.errors[path] {
-                ContentUnavailableView("Can't read this project", systemImage: "exclamationmark.triangle", description: Text(message))
-            } else {
-                ContentUnavailableView("Select a project", systemImage: "music.note.list")
             }
+            .id(model.layoutResets)
+            .searchable(
+                text: Binding(get: { model.isPluginView ? model.pluginQuery : model.query },
+                              set: { if model.isPluginView { model.pluginQuery = $0 } else { model.query = $0 } }),
+                placement: .toolbar,
+                prompt: model.isPluginView ? "Search plug-ins" : "Search projects, tracks and plug-ins")
+            PlayerBar()
+            ScanBanner()
         }
-        .id(model.layoutResets)
-        .searchable(
-            text: Binding(get: { model.isPluginView ? model.pluginQuery : model.query },
-                          set: { if model.isPluginView { model.pluginQuery = $0 } else { model.query = $0 } }),
-            placement: .toolbar,
-            prompt: model.isPluginView ? "Search plug-ins" : "Search projects, tracks and plug-ins")
-        .safeAreaInset(edge: .bottom, spacing: 0) { VStack(spacing: 0) { PlayerBar(); ScanBanner() } }
         .dropDestination(for: URL.self) { urls, _ in
             let dirs = urls.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true && $0.pathExtension.lowercased() != "logicx" }
             dirs.forEach { model.addFolder($0.path) }
@@ -171,7 +175,7 @@ struct ProjectRow: View {
         let entry = model.entries[path]
         VStack(alignment: .leading, spacing: 2) {
             HStack {
-                Text(LibraryModel.projectName(path)).lineLimit(1)
+                Text(LibraryModel.projectName(path)).fixedSize(horizontal: false, vertical: true)
                 if let v = model.verdict(for: path), !v.missing.isEmpty {
                     Image(systemName: v.status == .willNotOpen ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
                         .foregroundStyle(v.status == .willNotOpen ? .red : .orange)
@@ -189,7 +193,7 @@ struct ProjectRow: View {
                 Text("\(Int(e.metadata.bpm.rounded())) BPM · \(e.visibleTrackCount) tracks · \(e.plugins.count) plug-ins")
                     .font(.caption).foregroundStyle(.secondary)
                 Text(URL(fileURLWithPath: path).deletingLastPathComponent().path)
-                    .font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
+                    .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
             } else if model.errors[path] != nil {
                 Label("Can't read", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
             } else {
@@ -350,21 +354,21 @@ struct TrackHitRow: View {
             Text(hit.position.map(String.init) ?? "—").font(.body.monospacedDigit()).foregroundStyle(.secondary).frame(width: 32, alignment: .trailing)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    Text(highlighted(hit.name.isEmpty ? "—" : hit.name, terms)).lineLimit(1)
+                    Text(highlighted(hit.name.isEmpty ? "—" : hit.name, terms)).fixedSize(horizontal: false, vertical: true)
                     if hit.isHidden { Image(systemName: "eye.slash").font(.caption).foregroundStyle(.secondary).help("Hidden in Logic's arrangement") }
                 }
                 if !hit.objectName.isEmpty, hit.objectName != hit.name {
-                    Text(highlighted("Object: \(hit.objectName)", terms)).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                    Text(highlighted("Object: \(hit.objectName)", terms)).font(.caption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
                 }
                 let matchedPlugins = hit.pluginFingerprints.map { registry.entries[$0]?.name ?? $0 }.filter { name in
                     let folded = SearchMatcher.fold(name)
                     return pluginTerms.contains { folded.contains($0) }
                 }
                 if !matchedPlugins.isEmpty {
-                    Text(highlighted(matchedPlugins.joined(separator: " · "), pluginTerms)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(highlighted(matchedPlugins.joined(separator: " · "), pluginTerms)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 if !hit.channel.isEmpty, hit.channel != hit.name {
-                    Text(highlighted(hit.channel, terms)).font(.caption.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
+                    Text(highlighted(hit.channel, terms)).font(.caption.monospaced()).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
