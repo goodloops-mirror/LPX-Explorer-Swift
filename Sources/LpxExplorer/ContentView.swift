@@ -10,7 +10,7 @@ struct ContentView: View {
         NavigationSplitView {
             SidebarView()
         } content: {
-            if model.isPluginView { PluginRailView() } else if model.isSearching { SearchResultsView() } else { ProjectListView() }
+            if model.isPluginView { PluginRailView() } else { MiddlePane() }
         } detail: {
             if model.isPluginView {
                 if let fp = model.selectedPlugin, let row = model.pluginRows.first(where: { $0.fingerprint == fp }) {
@@ -103,10 +103,6 @@ struct ProjectListView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) { FilterChips(count: paths.count) }
         .toolbar {
-            ToolbarItem {
-                Toggle(isOn: $model.searchPanelOpen) { Label("Track Search", systemImage: "line.3.horizontal.decrease.circle") }
-                    .help("Search tracks across the whole library with filters")
-            }
             ToolbarItem {
                 Toggle(isOn: $model.onlyMissingPlugins) {
                     Label("Missing plug-ins only", systemImage: "exclamationmark.triangle")
@@ -265,69 +261,53 @@ struct ScanBanner: View {
     }
 }
 
-/// Library-wide search results: one row per matching track, grouped under its project; projects matched by name alone first.
+/// Middle column: the three filter fields stay mounted on top; below them is the folder's project list, or — as soon as
+/// anything is typed (here or in the toolbar's search box) — the library-wide results.
+struct MiddlePane: View {
+    @Environment(LibraryModel.self) private var model
+
+    var body: some View {
+        Group {
+            if model.isSearching { SearchResultsView() } else { ProjectListView() }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) { SearchFilterBar() }
+    }
+}
+
+/// Library-wide results: every row group is a project that matches, followed by the tracks/objects inside it that matched.
+/// The toolbar's search box matches everything (project, track, object and channel names, plug-ins); the filter fields
+/// above match only their own field; everything typed must match.
 struct SearchResultsView: View {
     @Environment(LibraryModel.self) private var model
-    @Environment(AuRegistry.self) private var registry
-
-    private struct Group: Identifiable { let path: String; let hits: [TrackHit]; var id: String { path } }
-
-    private var groups: [Group] {
-        var order: [String] = [], byPath: [String: [TrackHit]] = [:]
-        for h in model.trackResults.hits {
-            if byPath[h.path] == nil { order.append(h.path) }
-            byPath[h.path, default: []].append(h)
-        }
-        return order.map { Group(path: $0, hits: byPath[$0] ?? []) }
-    }
 
     var body: some View {
         @Bindable var model = model
-        let nameOnly = model.projectNameMatches
+        let terms = SearchMatcher.terms(of: model.query) + SearchMatcher.terms(of: model.filters.name)
         List(selection: $model.selectedProject) {
-            if !nameOnly.isEmpty {
-                Section("Projects matching as a whole (\(nameOnly.count))") {
-                    ForEach(nameOnly, id: \.self) { path in ProjectRow(path: path).tag(path) }
-                }
-            }
-            ForEach(groups) { g in
-                Section {
-                    ForEach(g.hits, id: \.offset) { h in
-                        TrackHitRow(hit: h, terms: SearchMatcher.terms(of: model.query))
-                            .contentShape(Rectangle())
-                            .onTapGesture { model.showTrack(path: h.path, offset: h.offset) }
-                    }
-                } header: {
-                    Text(LibraryModel.projectName(g.path))
+            ForEach(model.results, id: \.path) { result in
+                ProjectRow(path: result.path).tag(result.path)
+                ForEach(result.tracks, id: \.offset) { h in
+                    TrackHitRow(hit: h, terms: terms, pluginTerms: SearchMatcher.terms(of: model.query) + SearchMatcher.terms(of: model.filters.plugin))
+                        .padding(.leading, 18)
+                        .contentShape(Rectangle())
+                        .onTapGesture { model.showTrack(path: h.path, offset: h.offset) }
                 }
             }
             if let indexed = model.trackIndexedProjects, indexed < model.entries.count {
-                Text("Per-track results cover \(indexed) of \(model.entries.count) projects; the others can only match as a whole (name, track and plug-in names).")
+                Text("Per-track results cover \(indexed) of \(model.entries.count) projects; the others can only match as a whole.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if model.trackResults.total > model.trackResults.hits.count {
-                Text("Showing \(model.trackResults.hits.count) of \(model.trackResults.total) tracks — refine the search to see the rest.")
+            if model.totalMatchingTracks > model.listedTracks {
+                Text("Showing \(model.listedTracks) of \(model.totalMatchingTracks) matching tracks — refine the search to see the rest.")
                     .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .safeAreaInset(edge: .top, spacing: 0) { SearchFilterBar() }
-        .toolbar {
-            ToolbarItem {
-                Toggle(isOn: $model.searchPanelOpen) { Label("Track Search", systemImage: "line.3.horizontal.decrease.circle") }
-                    .help("Back to the project list")
             }
         }
         .navigationTitle("Search")
-        .navigationSubtitle("\(model.trackResults.total) track\(model.trackResults.total == 1 ? "" : "s")")
+        .navigationSubtitle("\(model.results.count) project\(model.results.count == 1 ? "" : "s") · \(model.totalMatchingTracks) track\(model.totalMatchingTracks == 1 ? "" : "s")")
         .navigationSplitViewColumnWidth(min: 300, ideal: 750)
         .overlay {
-            if nameOnly.isEmpty && model.trackResults.hits.isEmpty && !model.isScanning {
-                if model.query.isEmpty && !model.filters.hasText && model.filters.kinds.isEmpty {
-                    ContentUnavailableView("Search tracks", systemImage: "magnifyingglass",
-                                           description: Text("Type in the search box or use the filters above. Matches come from every folder in the library."))
-                } else {
-                    ContentUnavailableView.search(text: model.query)
-                }
+            if model.results.isEmpty && !model.isScanning {
+                ContentUnavailableView.search(text: model.query)
             }
         }
     }
@@ -337,8 +317,10 @@ struct TrackHitRow: View {
     @Environment(AuRegistry.self) private var registry
     let hit: TrackHit
     let terms: [String]
+    /// Terms that may match plug-in names: those plug-ins of the track are listed under it.
+    var pluginTerms: [String] = []
 
-    private func highlighted(_ s: String) -> AttributedString {
+    private func highlighted(_ s: String, _ terms: [String]) -> AttributedString {
         var out = AttributedString(s)
         let folded = SearchMatcher.fold(s)
         // Folding preserves character count for ordinary text; skip highlighting if it doesn't.
@@ -362,14 +344,21 @@ struct TrackHitRow: View {
             Text(hit.position.map(String.init) ?? "—").font(.body.monospacedDigit()).foregroundStyle(.secondary).frame(width: 32, alignment: .trailing)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    Text(highlighted(hit.name.isEmpty ? "—" : hit.name)).lineLimit(1)
+                    Text(highlighted(hit.name.isEmpty ? "—" : hit.name, terms)).lineLimit(1)
                     if hit.isHidden { Image(systemName: "eye.slash").font(.caption).foregroundStyle(.secondary).help("Hidden in Logic's arrangement") }
                 }
                 if !hit.objectName.isEmpty, hit.objectName != hit.name {
-                    Text(highlighted("Object: \(hit.objectName)")).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                    Text(highlighted("Object: \(hit.objectName)", terms)).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                }
+                let matchedPlugins = hit.pluginFingerprints.map { registry.entries[$0]?.name ?? $0 }.filter { name in
+                    let folded = SearchMatcher.fold(name)
+                    return pluginTerms.contains { folded.contains($0) }
+                }
+                if !matchedPlugins.isEmpty {
+                    Text(highlighted(matchedPlugins.joined(separator: " · "), pluginTerms)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 if !hit.channel.isEmpty, hit.channel != hit.name {
-                    Text(highlighted(hit.channel)).font(.caption.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
+                    Text(highlighted(hit.channel, terms)).font(.caption.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
                 }
             }
         }
@@ -384,7 +373,7 @@ struct SearchFilterBar: View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                TextField("Project", text: $model.filters.project)
+                TextField("Project name", text: $model.filters.project)
                 TextField("Track / object name", text: $model.filters.name)
                 TextField("Plug-in", text: $model.filters.plugin)
             }

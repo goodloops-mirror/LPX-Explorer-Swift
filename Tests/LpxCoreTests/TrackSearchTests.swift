@@ -320,3 +320,31 @@ final class ProjectSearchTests: XCTestCase {
         XCTAssertFalse(hit(.init()))
     }
 }
+
+final class SearchResultsTests: XCTestCase {
+    private func hit(_ path: String, _ pos: Int, _ name: String) -> TrackHit {
+        TrackHit(path: path, position: pos, offset: pos * 10, kind: .audio, isHidden: false, name: name, objectName: "", channel: "", pluginFingerprints: [])
+    }
+    private func name(_ p: String) -> String { URL(fileURLWithPath: p).deletingPathExtension().lastPathComponent }
+
+    func testTracksAreGroupedUnderTheirProjectInGivenOrder() {
+        let r = SearchResults.combine(hits: [hit("/m/B.logicx", 2, "b2"), hit("/m/A.logicx", 1, "a1"), hit("/m/B.logicx", 5, "b5")], projects: [], name: name)
+        XCTAssertEqual(r.map(\.path), ["/m/A.logicx", "/m/B.logicx"])
+        XCTAssertEqual(r.map { $0.tracks.map(\.name) }, [["a1"], ["b2", "b5"]])
+    }
+
+    func testWholeProjectMatchesAreMergedWithoutDuplicates() {
+        let r = SearchResults.combine(hits: [hit("/m/B.logicx", 2, "b2")], projects: ["/m/C.logicx", "/m/B.logicx", "/m/C.logicx"], name: name)
+        XCTAssertEqual(r.map(\.path), ["/m/B.logicx", "/m/C.logicx"])
+        XCTAssertEqual(r.map(\.tracks.count), [1, 0])
+    }
+
+    func testProjectsAreInNaturalNameOrder() {
+        let r = SearchResults.combine(hits: [], projects: ["/m/Song 10.logicx", "/m/Song 2.logicx", "/x/song 1.logicx"], name: name)
+        XCTAssertEqual(r.map { name($0.path) }, ["song 1", "Song 2", "Song 10"])
+    }
+
+    func testNothingInNothingOut() {
+        XCTAssertTrue(SearchResults.combine(hits: [], projects: [], name: name).isEmpty)
+    }
+}

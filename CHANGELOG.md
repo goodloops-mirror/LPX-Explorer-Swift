@@ -6,6 +6,9 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+### Changed
+- Search results are a list of matching projects, each followed by the tracks/objects inside it that matched. The toolbar search box matches everything (project, track, object and channel names, plug-ins); the three fields above the list match only their own field (project names / track and object names / plug-ins), and everything typed must match. The fields are always visible above the project list; typing in any of them switches to the library-wide results.
+
 ### Fixed
 - Search finds projects again by track names, object names and plug-ins, not just project names: projects that match as a whole are listed even without per-track rows (the field filters apply to them too).
 - Projects whose arrangement list couldn't be read (channel strips without track numbers) are now searchable per track; the results footer says when per-track results don't cover every project.

@@ -126,3 +126,27 @@ public enum ProjectSearch {
         return has(projectName, q.projectTerms) && has(entry.searchText, q.nameTerms) && has(pluginText, q.pluginTerms)
     }
 }
+
+/// One project in the result list with the tracks/objects inside it that matched (empty when it matched as a whole,
+/// e.g. by name or by a plug-in that no track row links to).
+public struct ProjectResult: Equatable, Sendable {
+    public var path: String
+    public var tracks: [TrackHit]
+    public init(path: String, tracks: [TrackHit] = []) { self.path = path; self.tracks = tracks }
+}
+
+public enum SearchResults {
+    /// Merge per-track hits and whole-project matches into one list of projects (natural name order, each path once),
+    /// every project carrying its matching tracks in the order given.
+    public static func combine(hits: [TrackHit], projects: [String], name: (String) -> String) -> [ProjectResult] {
+        var tracks: [String: [TrackHit]] = [:]
+        for h in hits { tracks[h.path, default: []].append(h) }
+        let paths = Set(tracks.keys).union(projects)
+        var names: [String: String] = [:]
+        for p in paths { names[p] = name(p) }
+        return paths.sorted { a, b in
+            let order = names[a]!.localizedStandardCompare(names[b]!)
+            return order == .orderedSame ? a < b : order == .orderedAscending
+        }.map { ProjectResult(path: $0, tracks: tracks[$0] ?? []) }
+    }
+}

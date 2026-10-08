@@ -52,8 +52,11 @@ final class LibraryModel {
     }
     var query = "" { didSet { if oldValue != query { if query.isEmpty { focusedTrack = nil }; scheduleSearch() } } }
     /// Library-wide track search (while `query` is non-empty): matching tracks, and projects matched by name alone.
-    private(set) var trackResults = TrackSearchResult(hits: [], total: 0)
-    private(set) var projectNameMatches: [String] = []
+    /// Projects that match, each with the tracks/objects inside it that matched.
+    private(set) var results: [ProjectResult] = []
+    /// Matching tracks in the whole library (may exceed what is listed: the list is capped).
+    private(set) var totalMatchingTracks = 0
+    private(set) var listedTracks = 0
     /// How many projects have per-track search rows (the rest only match as a whole).
     private(set) var trackIndexedProjects: Int?
     /// Track to scroll to / highlight in the inspector after a result was clicked.
@@ -326,11 +329,8 @@ final class LibraryModel {
     }
 
     var filters = SearchFilters() { didSet { if oldValue != filters { scheduleSearch() } } }
-    /// Show the search panel even before anything is typed (so filters can be the starting point).
-    var searchPanelOpen = false { didSet { if oldValue != searchPanelOpen { scheduleSearch() } } }
-
     var isSearching: Bool {
-        !isPluginView && (searchPanelOpen || !SearchMatcher.terms(of: query).isEmpty || filters.isActive)
+        !isPluginView && (!SearchMatcher.terms(of: query).isEmpty || filters.isActive)
     }
 
     func clearFilters() { filters = SearchFilters() }
@@ -341,7 +341,7 @@ final class LibraryModel {
         let text = query, f = filters
         let freeTerms = SearchMatcher.terms(of: text)
         guard !freeTerms.isEmpty || f.hasText || !f.kinds.isEmpty else {
-            trackResults = TrackSearchResult(hits: [], total: 0); projectNameMatches = []; return
+            results = []; totalMatchingTracks = 0; listedTracks = 0; return
         }
         searchTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
@@ -357,15 +357,16 @@ final class LibraryModel {
             guard !Task.isCancelled else { return }
             // Projects that match as a whole (name, any track/object name, any plug-in) but have no track row listed below.
             let pq = ProjectSearch.Query(terms: q.terms, projectTerms: q.projectTerms, nameTerms: q.nameTerms, pluginTerms: q.pluginTerms,
-                                         restrictsTracks: !q.kinds.isEmpty || q.hidden != .include)
-            let listed = Set(result.hits.map(\.path))
+                                         // Track-name, kind and hidden filters are about tracks: a project only counts through its matching tracks.
+                                         restrictsTracks: !q.nameTerms.isEmpty || !q.kinds.isEmpty || q.hidden != .include)
             self.refreshProjectTexts()
-            let nameMatches = pq.restrictsTracks ? [] : self.entries.filter { path, entry in
-                !listed.contains(path) && ProjectSearch.matches(pq, entry: entry, projectName: self.foldedProjectName(path), pluginText: self.pluginText(path, entry))
-            }.keys.sorted { Self.projectName($0).localizedStandardCompare(Self.projectName($1)) == .orderedAscending }
-            self.trackResults = result
+            let wholeProjects = pq.restrictsTracks ? [] : self.entries.filter { path, entry in
+                ProjectSearch.matches(pq, entry: entry, projectName: self.foldedProjectName(path), pluginText: self.pluginText(path, entry))
+            }.map(\.key)
+            self.results = SearchResults.combine(hits: result.hits, projects: wholeProjects, name: Self.projectName)
+            self.totalMatchingTracks = result.total
+            self.listedTracks = result.hits.count
             self.trackIndexedProjects = (try? await self.db?.trackIndexedProjectCount()) ?? nil
-            self.projectNameMatches = nameMatches
         }
     }
 
