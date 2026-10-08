@@ -156,6 +156,7 @@ public actor SummaryDatabase {
                 try run("DELETE FROM details WHERE path = ?", [.text(p)])
                 try run("DELETE FROM tracks WHERE path = ?", [.text(p)])
                 try run("DELETE FROM failures WHERE path = ?", [.text(p)])
+                try run("DELETE FROM bounces WHERE project_path = ?", [.text(p)])
             }
             try exec("COMMIT")
         } catch {
@@ -276,6 +277,38 @@ public actor SummaryDatabase {
         return n
     }
 
+    /// Replace the remembered bounces of these projects (an empty list forgets them).
+    public func saveBounces(_ byProject: [String: [BounceFile]]) throws {
+        guard !byProject.isEmpty else { return }
+        try exec("BEGIN IMMEDIATE")
+        do {
+            for (project, files) in byProject {
+                try run("DELETE FROM bounces WHERE project_path = ?", [.text(project)])
+                for (i, f) in files.enumerated() {
+                    try run("INSERT INTO bounces(project_path, ord, file_path, file_name, kind, stem, size, mtime) VALUES (?,?,?,?,?,?,?,?)",
+                            [.text(project), .int(Int64(i)), .text(f.path), .text(f.fileName), .text(f.kind.rawValue),
+                             f.stemNumber.map { Bind.int(Int64($0)) } ?? .null, .int(Int64(bitPattern: f.sizeBytes)), .int(f.mtimeUnix)])
+                }
+            }
+            try exec("COMMIT")
+        } catch {
+            try? exec("ROLLBACK")
+            throw error
+        }
+    }
+
+    /// Every remembered bounce, by project path.
+    public func bounces() throws -> [String: [BounceFile]] {
+        var out: [String: [BounceFile]] = [:]
+        try query("SELECT project_path, file_path, file_name, kind, stem, size, mtime FROM bounces ORDER BY project_path, ord") { stmt in
+            let stem: Int? = sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(stmt, 4))
+            out[text(stmt, 0), default: []].append(BounceFile(
+                path: text(stmt, 1), fileName: text(stmt, 2), kind: BounceKind(rawValue: text(stmt, 3)) ?? .mix, stemNumber: stem,
+                sizeBytes: UInt64(bitPattern: sqlite3_column_int64(stmt, 5)), mtimeUnix: sqlite3_column_int64(stmt, 6)))
+        }
+        return out
+    }
+
     public func count() throws -> Int {
         var n = 0
         try query("SELECT COUNT(*) FROM entries") { n = Int(sqlite3_column_int64($0, 0)) }
@@ -316,6 +349,8 @@ public actor SummaryDatabase {
             CREATE TABLE IF NOT EXISTS tracks(id INTEGER PRIMARY KEY, path TEXT NOT NULL, position INTEGER, track_offset INTEGER NOT NULL, kind TEXT NOT NULL, hidden INTEGER NOT NULL,
                 name TEXT NOT NULL, object_name TEXT NOT NULL, channel TEXT NOT NULL, text TEXT NOT NULL, plugin_text TEXT NOT NULL, fingerprints TEXT NOT NULL, project_text TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS failures(path TEXT PRIMARY KEY, pd_mtime INTEGER NOT NULL, pd_size INTEGER NOT NULL, message TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS bounces(project_path TEXT NOT NULL, ord INTEGER NOT NULL, file_path TEXT NOT NULL, file_name TEXT NOT NULL, kind TEXT NOT NULL, stem INTEGER, size INTEGER NOT NULL, mtime INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS bounces_project ON bounces(project_path);
             CREATE INDEX IF NOT EXISTS tracks_path ON tracks(path);
             """)
         // Stale parser output (or schema) ⇒ drop every row; they are re-derived by the next scan.

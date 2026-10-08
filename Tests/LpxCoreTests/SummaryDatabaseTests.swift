@@ -178,6 +178,37 @@ final class SummaryDatabaseTests: XCTestCase {
         XCTAssertFalse(again)
     }
 
+    private func bounce(_ name: String, kind: BounceKind = .mix, stem: Int? = nil, size: UInt64 = 10, mtime: Int64 = 5) -> BounceFile {
+        BounceFile(path: "/m/Bounces/\(name)", fileName: name, kind: kind, stemNumber: stem, sizeBytes: size, mtimeUnix: mtime)
+    }
+
+    func testBouncesAreRememberedPerProjectAndReplaced() async throws {
+        let db = try SummaryDatabase(url: try dbURL())
+        let mix = bounce("A MIX ALL.wav"), stem = bounce("A STM#01.wav", kind: .stem, stem: 1)
+        try await db.saveBounces(["/m/A.logicx": [mix, stem], "/m/B.logicx": [bounce("B.wav")]])
+        let all = try await db.bounces()
+        XCTAssertEqual(all["/m/A.logicx"], [mix, stem], "order is kept")
+        XCTAssertEqual(all["/m/B.logicx"]?.map(\.fileName), ["B.wav"])
+
+        try await db.saveBounces(["/m/A.logicx": [bounce("A v2.wav")]])
+        let replaced = try await db.bounces()
+        XCTAssertEqual(replaced["/m/A.logicx"]?.map(\.fileName), ["A v2.wav"])
+        XCTAssertNotNil(replaced["/m/B.logicx"], "other projects are untouched")
+
+        try await db.saveBounces(["/m/A.logicx": []])
+        let cleared = try await db.bounces()
+        XCTAssertNil(cleared["/m/A.logicx"])
+    }
+
+    func testRemovingAProjectForgetsItsBounces() async throws {
+        let db = try SummaryDatabase(url: try dbURL())
+        try await db.upsert([summary("/m/A.logicx")])
+        try await db.saveBounces(["/m/A.logicx": [bounce("A.wav")]])
+        try await db.remove(paths: ["/m/A.logicx"])
+        let after = try await db.bounces()
+        XCTAssertTrue(after.isEmpty)
+    }
+
     func testFailureIsReplacedWhenTheSameProjectFailsAgain() async throws {
         let db = try SummaryDatabase(url: try dbURL())
         try await db.recordFailures([ProjectFailure(path: "/m/x.logicx", stamp: DatabaseStamp(mtime: 1, size: 1), message: "first")])

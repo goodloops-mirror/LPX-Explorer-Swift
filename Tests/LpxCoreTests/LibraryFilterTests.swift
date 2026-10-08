@@ -11,6 +11,18 @@ final class LibraryFilterTests: XCTestCase {
     private let installedPlugin = AURef(typeCode: "aufx", subtype: "Here", manufacturer: "Mfr1", offset: 0)
     private let missingPlugin = AURef(typeCode: "aufx", subtype: "Gone", manufacturer: "Mfr2", offset: 0)
 
+    func testBounceFilterKeepsProjectsWithOrWithoutABounce() {
+        let s = ["a": summary("a"), "b": summary("b"), "c": summary("c")].mapValues(ProjectListEntry.init(summary:))
+        let bounced: Set<String> = ["a", "c"]
+        XCTAssertEqual(LibraryFilter(bounce: .has).apply(to: ["a", "b", "c"], entries: s, installed: nil, withBounce: bounced), ["a", "c"])
+        XCTAssertEqual(LibraryFilter(bounce: .none).apply(to: ["a", "b", "c"], entries: s, installed: nil, withBounce: bounced), ["b"])
+        XCTAssertEqual(LibraryFilter(bounce: .any).apply(to: ["a", "b", "c"], entries: s, installed: nil, withBounce: bounced), ["a", "b", "c"])
+        XCTAssertTrue(LibraryFilter(bounce: .has).isActive)
+        XCTAssertFalse(LibraryFilter(bounce: .any).isActive)
+        XCTAssertTrue(BounceFilter.has.allows(hasBounce: true)); XCTAssertFalse(BounceFilter.has.allows(hasBounce: false))
+        XCTAssertTrue(BounceFilter.none.allows(hasBounce: false)); XCTAssertFalse(BounceFilter.none.allows(hasBounce: true))
+    }
+
     func testNoFilterKeepsEverythingIncludingUnreadProjects() {
         let out = LibraryFilter().apply(to: ["a", "b"], entries: ["a": summary("a")].mapValues(ProjectListEntry.init(summary:)), installed: nil)
         XCTAssertEqual(out, ["a", "b"])

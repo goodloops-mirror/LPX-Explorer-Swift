@@ -7,6 +7,10 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 ## [Unreleased]
 
 ### Added
+- Bounces: the app finds each project's bounce by name — the project name (with its version number) followed by anything of `MIX ALL`, an SMPTE timestamp, or `STM#nn` for stem nn — in a `Bounces` folder next to the project (all subfolders) or inside the package. The project detail shows the mix prominently with its stems below, the project list marks projects that have a bounce, and a "Bounce: any / Has bounce / No bounce" filter sits next to the search fields. Lookups are cached and re-checked in the background after every scan.
+- A player at the bottom of the window: play / pause, the waveform with a playhead (click or drag to jump), times, and "back to the project" the playback was started from. It keeps playing while you browse.
+
+### Added
 - Inspector metadata now matches what the original app showed: frame rate, created and modified dates (with "3 days ago"), impulse responses, sample rate in kHz, "Bundle size", and a "Snapshot from last save" caption under the window image. The project list also shows each project's folder.
 
 ## [0.5.0] - 2026-10-08

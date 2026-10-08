@@ -33,7 +33,7 @@ final class LibraryModel {
     private(set) var isLoadingCache = false
     /// The on-disk library couldn't be opened: this session starts from scratch and nothing is remembered.
     private(set) var cacheUnavailable = false
-    private(set) var isScanning = false { didSet { if oldValue && !isScanning { scheduleSearch() } } }
+    private(set) var isScanning = false { didSet { if oldValue && !isScanning { scheduleSearch(); syncBounces() } } }
     private(set) var scanTotal = 0
     private(set) var scanDone = 0
     private(set) var scanMessage: String?
@@ -54,6 +54,10 @@ final class LibraryModel {
     /// Library-wide track search (while `query` is non-empty): matching tracks, and projects matched by name alone.
     /// Projects that match, each with the tracks/objects inside it that matched.
     private(set) var results: [ProjectResult] = []
+    /// Bounces found next to / inside each project (cached in SQLite; refreshed in the background).
+    private(set) var bounces: [String: [BounceFile]] = [:]
+    var bounceFilter: BounceFilter = .any { didSet { if oldValue != bounceFilter { scheduleSearch() } } }
+    @ObservationIgnored private var bounceTask: Task<Void, Never>?
     /// Matching tracks in the whole library (may exceed what is listed: the list is capped).
     private(set) var totalMatchingTracks = 0
     private(set) var listedTracks = 0
@@ -120,6 +124,7 @@ final class LibraryModel {
             for e in cached where entries[e.path] == nil { entries[e.path] = e }
             // Projects that failed to parse stay failed until their file changes (no retry at every launch).
             for (path, message) in (try? await db.failures()) ?? [:] where entries[path] == nil { errors[path] = message }
+            bounces = (try? await db.bounces()) ?? [:]
             Task { _ = try? await db.rebuildTracksIfNeeded() } // derived search rows; cheap and never a re-parse
             for folder in folders where folderProjects[folder] == nil {
                 // Provisional list straight from the cache; discovery below confirms it.
@@ -163,7 +168,7 @@ final class LibraryModel {
         let gone = folderProjects[path] ?? []
         folderProjects[path] = nil
         sortedByFolder[path] = nil
-        for p in gone where !folders.contains(where: { (folderProjects[$0] ?? []).contains(p) }) { entries[p] = nil; errors[p] = nil }
+        for p in gone where !folders.contains(where: { (folderProjects[$0] ?? []).contains(p) }) { entries[p] = nil; errors[p] = nil; bounces[p] = nil }
         if let db { Task { try? await db.remove(paths: gone) } }
         UserDefaults.standard.set(folders, forKey: Self.foldersKey)
         if selectedFolder == path { selectedFolder = folders.first }
@@ -308,6 +313,40 @@ final class LibraryModel {
         selectedProject = path
     }
 
+    // MARK: bounces
+
+    func hasBounce(_ path: String) -> Bool { !(bounces[path] ?? []).isEmpty }
+    private var bouncePaths: Set<String> { Set(bounces.compactMap { $0.value.isEmpty ? nil : $0.key }) }
+
+    /// Look for every project's bounces in the background (shared `Bounces` folders are listed once) and remember the
+    /// result. A project whose bundle can't be seen right now (drive offline) keeps what was cached.
+    func syncBounces() {
+        bounceTask?.cancel()
+        let projects = Array(entries.keys)
+        let known = bounces
+        guard !projects.isEmpty else { return }
+        bounceTask = Task { [weak self] in
+            let found = await Task.detached(priority: .utility) { () -> [String: [BounceFile]] in
+                let cache = BounceListingCache()
+                let lock = NSLock()
+                var out: [String: [BounceFile]] = [:]
+                DispatchQueue.concurrentPerform(iterations: projects.count) { i in
+                    let path = projects[i]
+                    guard !Task.isCancelled, FileManager.default.fileExists(atPath: path) else { return }
+                    let files = BounceFinder.find(project: URL(fileURLWithPath: path), cache: cache)
+                    lock.lock(); out[path] = files; lock.unlock()
+                }
+                return out
+            }.value
+            guard !Task.isCancelled, let self else { return }
+            var changed: [String: [BounceFile]] = [:]
+            for (path, files) in found where (known[path] ?? []) != files { changed[path] = files }
+            guard !changed.isEmpty else { return }
+            for (path, files) in changed { self.bounces[path] = files.isEmpty ? nil : files }
+            try? await self.db?.saveBounces(changed)
+        }
+    }
+
     // MARK: search
 
     /// Field filters above the results (all optional, all combined with the search box).
@@ -364,6 +403,7 @@ final class LibraryModel {
                 ProjectSearch.matches(pq, entry: entry, projectName: self.foldedProjectName(path), pluginText: self.pluginText(path, entry))
             }.map(\.key)
             self.results = SearchResults.combine(hits: result.hits, projects: wholeProjects, name: Self.projectName)
+                .filter { self.bounceFilter.allows(hasBounce: self.hasBounce($0.path)) }
             self.totalMatchingTracks = result.total
             self.listedTracks = result.hits.count
             self.trackIndexedProjects = (try? await self.db?.trackIndexedProjectCount()) ?? nil
@@ -397,8 +437,8 @@ final class LibraryModel {
     /// The folder's projects in natural name order, narrowed by the active filters and search text.
     func visibleProjects(in folder: String) -> [String] {
         var paths = sortedByFolder[folder] ?? []
-        let filter = LibraryFilter(similarity: similarityFilter, onlyMissingPlugins: onlyMissingPlugins)
-        if filter.isActive { paths = filter.apply(to: paths, entries: entries, installed: registry.installed) }
+        let filter = LibraryFilter(similarity: similarityFilter, onlyMissingPlugins: onlyMissingPlugins, bounce: bounceFilter)
+        if filter.isActive { paths = filter.apply(to: paths, entries: entries, installed: registry.installed, withBounce: bouncePaths) }
         let terms = SearchMatcher.terms(of: query)
         guard !terms.isEmpty else { return paths }
         if haystackRegistryVersion != registry.version {

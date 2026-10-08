@@ -5,6 +5,7 @@ import SwiftUI
 struct LpxExplorerApp: App {
     @State private var registry: AuRegistry
     @State private var model: LibraryModel
+    @State private var player = AudioPlayerModel()
     @Environment(\.openWindow) private var openWindow
 
     init() {
@@ -21,6 +22,7 @@ struct LpxExplorerApp: App {
             ContentView()
                 .environment(model)
                 .environment(registry)
+                .environment(player)
                 .frame(minWidth: 900, minHeight: 560)
                 .task {
                     if registry.needsScan { registry.refresh() }

@@ -6,7 +6,7 @@ import SwiftUI
 struct AudioSection: View {
     let bundlePath: String
     @State private var files: [AudioFile]?
-    @State private var player = AudioPlayerModel()
+    @Environment(AudioPlayerModel.self) private var player
 
     private var hero: AudioFile? { files.flatMap(AudioInventory.pickHero) }
 
@@ -27,19 +27,17 @@ struct AudioSection: View {
             Text(files.map { "Audio files (\($0.count))" } ?? "Audio files")
         }
         .task(id: bundlePath) {
-            player.stop()
             files = nil
             let path = bundlePath
             files = await Task.detached(priority: .userInitiated) { AudioInventory.collect(bundle: URL(fileURLWithPath: path)) }.value
         }
-        .onDisappear { player.stop() }
     }
 
     private func heroPlayer(_ hero: AudioFile) -> some View {
         let isCurrent = player.currentPath == hero.path
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Button { player.toggle(hero) } label: {
+                Button { player.toggle(hero, projectPath: bundlePath) } label: {
                     Image(systemName: isCurrent && player.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.title)
                 }.buttonStyle(.plain)
                 VStack(alignment: .leading) {
@@ -59,7 +57,7 @@ struct AudioSection: View {
     private func row(_ f: AudioFile) -> some View {
         let isCurrent = player.currentPath == f.path
         return HStack {
-            Button { player.toggle(f) } label: {
+            Button { player.toggle(f, projectPath: bundlePath) } label: {
                 Image(systemName: isCurrent && player.isPlaying ? "pause.fill" : "play.fill")
             }.buttonStyle(.borderless)
             Image(systemName: symbol(f.category)).foregroundStyle(.secondary).frame(width: 18)

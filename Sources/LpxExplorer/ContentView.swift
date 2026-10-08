@@ -32,7 +32,7 @@ struct ContentView: View {
                           set: { if model.isPluginView { model.pluginQuery = $0 } else { model.query = $0 } }),
             placement: .toolbar,
             prompt: model.isPluginView ? "Search plug-ins" : "Search projects, tracks and plug-ins")
-        .safeAreaInset(edge: .bottom) { ScanBanner() }
+        .safeAreaInset(edge: .bottom, spacing: 0) { VStack(spacing: 0) { PlayerBar(); ScanBanner() } }
         .dropDestination(for: URL.self) { urls, _ in
             let dirs = urls.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true && $0.pathExtension.lowercased() != "logicx" }
             dirs.forEach { model.addFolder($0.path) }
@@ -176,6 +176,9 @@ struct ProjectRow: View {
                     Image(systemName: v.status == .willNotOpen ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
                         .foregroundStyle(v.status == .willNotOpen ? .red : .orange)
                         .help(v.headline)
+                }
+                if model.hasBounce(path) {
+                    Image(systemName: "waveform").foregroundStyle(.secondary).help("Has a bounce")
                 }
                 if let n = entry?.alternativeCount, n > 1 {
                     Text("\(n) alts").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
@@ -387,6 +390,10 @@ struct SearchFilterBar: View {
                     Toggle(g.rawValue, isOn: Binding(get: { on }, set: { if $0 { model.filters.kinds.insert(g) } else { model.filters.kinds.remove(g) } }))
                         .toggleStyle(.button).controlSize(.small)
                 }
+                Picker("Bounce", selection: $model.bounceFilter) {
+                    ForEach(BounceFilter.allCases, id: \.self) { Text($0 == .any ? "Bounce: any" : $0.rawValue).tag($0) }
+                }
+                .labelsHidden().controlSize(.small).fixedSize().help("Only projects with / without a bounce")
                 Picker("Hidden", selection: $model.filters.hidden) {
                     Text("Hidden tracks: show").tag(TrackSearchQuery.Visibility.include)
                     Text("Hidden tracks: skip").tag(TrackSearchQuery.Visibility.exclude)

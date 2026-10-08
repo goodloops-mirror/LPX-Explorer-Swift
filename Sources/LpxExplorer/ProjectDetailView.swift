@@ -224,6 +224,7 @@ struct ProjectDetailView: View {
                     }
                 }
             }
+            BouncesSection(projectPath: summary.path)
             AudioSection(bundlePath: summary.path)
         }
         .formStyle(.grouped)
