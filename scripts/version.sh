@@ -8,7 +8,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # Run `git` against $LPX_VERSION_REPO when set (used by the release test).
 [ -n "${LPX_VERSION_REPO:-}" ] && cd "$LPX_VERSION_REPO"
-latest_tag() { git tag --list 'v[0-9]*' | grep -Ev '^v0\.0\.' | sort -t. -k1.2,1n -k2,2n -k3,3n | tail -1 || true; }
+# Nearest release tag reachable from HEAD (so a checkout of an old tag reports that tag, not the newest one).
+latest_tag() { git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude 'v0.0.*' 2>/dev/null || true; }
 tag="$(latest_tag)"
 case "${1:-}" in
   --build) git rev-list --count HEAD 2>/dev/null || echo 1 ;;

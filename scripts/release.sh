@@ -1,11 +1,12 @@
 #!/bin/bash
 # Cut a release: update CHANGELOG.md, commit it, and tag the commit. Never pushes.
 #
-#   scripts/release.sh <major|minor|patch|X.Y.Z> [--dry-run] [--skip-tests]
+#   scripts/release.sh <major|minor|patch|X.Y.Z> [--dry-run] [--skip-tests] [--no-package]
 #
 # The new CHANGELOG section = the hand-written notes under "## [Unreleased]"
 # + commit subjects since the previous release, grouped (feat: → Added, fix: → Fixed, everything else → Changed).
 # Conventional prefixes (feat:, fix:, docs:, perf:, refactor:, test:, chore:) are optional.
+# After tagging it builds the app and zips it to dist/ (scripts/package.sh); --no-package skips that.
 # --dry-run prints the section and changes nothing.
 # Env: RELEASE_TRAILER="Co-Authored-By: …" is appended to the release commit message.
 # Env: LPX_RELEASE_REPO=<dir> runs against another repository (used by scripts/test-release.sh).
@@ -14,10 +15,10 @@ cd "$(dirname "$0")/.."
 SCRIPTS="$PWD/scripts"
 [ -n "${LPX_RELEASE_REPO:-}" ] && cd "$LPX_RELEASE_REPO"
 
-bump="${1:-}"; dry=0; skip_tests=0
+bump="${1:-}"; dry=0; skip_tests=0; package=1
 shift || true
-for a in "$@"; do case "$a" in --dry-run) dry=1 ;; --skip-tests) skip_tests=1 ;; *) echo "unknown option $a" >&2; exit 2 ;; esac; done
-[ -n "$bump" ] || { echo "usage: scripts/release.sh <major|minor|patch|X.Y.Z> [--dry-run] [--skip-tests]" >&2; exit 2; }
+for a in "$@"; do case "$a" in --dry-run) dry=1 ;; --skip-tests) skip_tests=1 ;; --no-package) package=0 ;; *) echo "unknown option $a" >&2; exit 2 ;; esac; done
+[ -n "$bump" ] || { echo "usage: scripts/release.sh <major|minor|patch|X.Y.Z> [--dry-run] [--skip-tests] [--no-package]" >&2; exit 2; }
 
 current="$(LPX_VERSION_REPO="$PWD" "$SCRIPTS/version.sh")"
 prev_tag=""; [ "$current" != "0.0.0" ] && prev_tag="v$current"
@@ -82,4 +83,5 @@ git add CHANGELOG.md
 msg="Release $tag"; [ -n "${RELEASE_TRAILER:-}" ] && msg="$msg"$'\n\n'"$RELEASE_TRAILER"
 git commit -q -m "$msg"
 git tag -a "$tag" -m "LPX Explorer $new"$'\n\n'"$section"
+if [ "$package" = 1 ] && [ -z "${LPX_RELEASE_REPO:-}" ]; then "$SCRIPTS/package.sh"; fi
 echo "Created commit and tag $tag. Not pushed — when ready: git push origin main $tag"

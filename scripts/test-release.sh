@@ -43,4 +43,7 @@ echo dirty >> a
 [ "$("$S/version.sh")" = "0.2.1" ] || fail "patch bump"
 [ "$(git tag --list 'v0.*' | sort | tr '\n' ' ')" = "v0.0.9 v0.1.0 v0.2.0 v0.2.1 " ] || fail "tags"
 [ "$(grep -c '^## \[' CHANGELOG.md)" = "4" ] || fail "changelog sections: $(grep '^## \[' CHANGELOG.md | tr '\n' ' ')"; ok "patch release, changelog stays well-formed"
+git checkout -q v0.1.0
+[ "$("$S/version.sh")" = "0.1.0" ] || fail "checkout of an old tag must report that tag"
+[ "$("$S/version.sh" --describe)" = "v0.1.0" ] || fail "describe at a tag: $("$S/version.sh" --describe)"; git checkout -q main; ok "version follows the checked-out commit"
 echo "all release tests passed"

@@ -1,10 +1,13 @@
 #!/bin/bash
 # Build a double-clickable LPX Explorer.app (ad-hoc signed, local use only).
 set -euo pipefail
-cd "$(dirname "$0")/.."
-VERSION="$(scripts/version.sh)"          # latest release tag, e.g. 0.1.0
-BUILD="$(scripts/version.sh --build)"   # commit count
-DESCRIBE="$(scripts/version.sh --describe)"  # e.g. 0.1.0-3-gabc123-dirty (what exactly is built)
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# LPX_APP_SRC: build another checkout (package.sh uses it for old release tags) with these scripts.
+cd "${LPX_APP_SRC:-$HERE/..}"
+export LPX_VERSION_REPO="$PWD"
+VERSION="$("$HERE/version.sh")"          # latest release tag, e.g. 0.1.0
+BUILD="$("$HERE/version.sh" --build)"   # commit count
+DESCRIBE="$("$HERE/version.sh" --describe)"  # e.g. 0.1.0-3-gabc123-dirty (what exactly is built)
 swift build -c release --product LpxExplorer
 APP="build/LPX Explorer.app"
 rm -rf "$APP"
