@@ -21,5 +21,5 @@ name="$(LPX_VERSION_REPO="$src" "$ROOT/scripts/version.sh" --describe)"
 cd "$src"
 zip="$ROOT/dist/LPX-Explorer-$name.zip"
 rm -f "$zip"
-ditto -c -k --keepParent "build/LPX Explorer.app" "$zip"
+ditto -c -k --keepParent --norsrc --noextattr --noqtn "build/LPX Explorer.app" "$zip"   # no ._ metadata files from HFS+ volumes
 echo "Packaged: dist/$(basename "$zip") ($(du -h "$zip" | cut -f1))"
