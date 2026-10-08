@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>LPX Explorer – Quick Guide</title>
+<style>
+  body { font-family: "Helvetica Neue", Helvetica, sans-serif; font-size: 10pt; line-height: 1.35; color: #111; }
+  h1 { font-size: 22pt; margin: 0 0 2pt 0; }
+  h2 { font-size: 12.5pt; margin: 14pt 0 3pt 0; color: #1f5f8b; }
+  p { margin: 0 0 5pt 0; }
+  li { margin: 0 0 2pt 0; }
+  .sub { color: #666; margin-bottom: 8pt; }
+  .k { font-family: Menlo, monospace; font-size: 9pt; background: #eee; }
+  .small { font-size: 8.5pt; color: #666; }
+</style></head><body>
+
+<p><img src="docs/manual-icon.png"></p>
+<h1>LPX Explorer</h1>
+<p class="sub">Quick guide · find tracks, plug-ins and bounces across your Logic Pro projects – without opening Logic.</p>
+
+<h2>Getting started</h2>
+<ol>
+<li><b>Add a folder</b> that contains your <span class="k">.logicx</span> projects (File ▸ Add Folder… <span class="k">⌘O</span>, or drop a folder on the window). Subfolders and <span class="k">Backups</span> folders are included.</li>
+<li>The first scan reads every project once. After that only new or changed projects are read again, so starting the app is fast. <span class="k">⌘R</span> rescans.</li>
+<li>The app is <b>read-only</b>: it never changes a project, never opens Logic and makes no network requests. Everything it remembers is kept in <span class="k">~/Library/Application Support/LpxExplorer</span>.</li>
+</ol>
+
+<h2>The window</h2>
+<p>From left to right: <b>folders</b> (and the Plug-ins view) · the <b>project list</b> · the project's <b>details</b> with its <b>bounces</b> below · the <b>tracks</b> in Logic's order, hidden tracks marked. The <b>Tracks</b> button in the toolbar hides or shows the track pane (View ▸ Reset Column Widths restores the default layout). Click a key or tempo in the details to find similar projects. Right-click a project to reveal it in Finder or copy its path.</p>
+
+<h2>Searching</h2>
+<ul>
+<li>The <b>search box</b> (top right) matches <i>everything</i>: project names, track and object names, channel names and plug-ins. Several words must all match.</li>
+<li>The three <b>fields above the list</b> match only their own field – <i>Project name</i>, <i>Track / object name</i>, <i>Plug-in</i> – and narrow the results further. Buttons below them limit the result to audio, instrument or folder tracks, to projects with or without a bounce, and show or skip hidden tracks.</li>
+<li>Results are the matching <b>projects</b>, each followed by the <b>tracks</b> inside it that matched. Click a track to open its project and jump to that track. Searching covers the whole library, not only the selected folder.</li>
+</ul>
+
+<h2>Bounces and the player</h2>
+<ul>
+<li>A bounce belongs to a project when its <b>file name starts with the project's name</b>, version number included; whatever follows is ignored. A file with <span class="k">STM#nn</span> after the name is stem <i>nn</i>; everything else is a mix, the newest being the main one.</li>
+<li>They are looked up in <span class="k">Bounces</span> folders in the project's folder and in every folder above it up to the library folder (so projects in <span class="k">Backups</span> find the <span class="k">Bounces</span> next to it), including all subfolders, and inside the project package.</li>
+<li>Click a bounce to play it in the <b>player</b> at the bottom: click or drag the waveform to jump, <span class="k">Space</span> plays or pauses (except while you type), and “back to project” returns to where it started. It keeps playing while you browse.</li>
+</ul>
+
+<h2>Plug-ins and compatibility</h2>
+<p>The <b>Plug-ins</b> view lists every plug-in used in the library with the projects that use it. A project that needs plug-ins this Mac doesn't have shows a warning; “Missing plug-ins only” filters for them. Plug-in names come from the installed Audio Units (<span class="k">auval</span>).</p>
+
+<h2>Good to know</h2>
+<ul>
+<li>Track names are shown exactly as stored; names are never used to guess what a track is.</li>
+<li>Projects from older Logic versions are read too (tested with Logic Pro X 10.5 and 11).</li>
+<li>Reveal in Finder is the only way a project is “opened” – never launched in Logic.</li>
+</ul>
+
+<p class="small" style="margin-top:14pt">LPX Explorer is free software (GPL-3.0-or-later) from <b>Good Loops</b> · www.good-loops.com – based on LPX Explorer by Rhyd Lewis, whose reverse-engineering of the Logic Pro project format made it possible. Source code: github.com/goodloops-mirror/LPX-Explorer-Swift</p>
+</body></html>

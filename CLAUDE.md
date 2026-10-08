@@ -37,6 +37,10 @@ swift run LpxExplorer                   # run the app unbundled
 swift build -c release --product lpx-scan && .build/release/lpx-scan <folder> [workers]
 ```
 
+## Manual
+
+`docs/manual.html` is the source of the two-page guide; `swift scripts/make-manual.swift` renders `docs/LPX Explorer Manual.pdf` (commit both), `make-app.sh` bundles it as `Resources/Manual.pdf` and Help ▸ LPX Explorer Manual opens it (`Manual.swift`). Keep it short and update it when a feature changes how the app is used.
+
 ## Test material & oracle
 
 - **Only `example_projects/` may be read as real project data** (git-ignored, ~1.2 GB, large real projects). Never read or scan any other `.logicx` on the machine, and never commit `example_projects/` or `Tests/Golden/`.

@@ -38,6 +38,9 @@ struct LpxExplorerApp: App {
             CommandGroup(replacing: .appInfo) {
                 Button("About LPX Explorer") { openWindow(id: "about") }
             }
+            CommandGroup(replacing: .help) {
+                Button("LPX Explorer Manual") { Manual.open() }.keyboardShortcut("?", modifiers: .command)
+            }
             CommandGroup(after: .toolbar) {
                 Button("Reset Column Widths") { model.resetColumnWidths() }
             }

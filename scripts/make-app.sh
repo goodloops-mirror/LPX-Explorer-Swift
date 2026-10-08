@@ -13,6 +13,8 @@ APP="build/LPX Explorer.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/LpxExplorer "$APP/Contents/MacOS/LpxExplorer"
+# The quick guide (Help ▸ LPX Explorer Manual); regenerate it with `swift scripts/make-manual.swift` after editing docs/manual.html.
+[ -f "docs/LPX Explorer Manual.pdf" ] && cp "docs/LPX Explorer Manual.pdf" "$APP/Contents/Resources/Manual.pdf"
 # Good Loops logo for the About panel.
 cp "Graphics/good loops logo.png" "$APP/Contents/Resources/GoodLoopsLogo.png"
 # App icon: Graphics/Icons/macOS App Icon — 1024.png → AppIcon.icns (all sizes macOS expects).
