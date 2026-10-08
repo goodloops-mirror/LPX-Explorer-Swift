@@ -38,7 +38,7 @@ struct AboutView: View {
 
                 if let logo, let link = URL(string: AboutInfo.companyURL) {
                     Link(destination: link) { Image(nsImage: logo).resizable().scaledToFit().frame(width: 120, height: 120) }
-                        .buttonStyle(.plain).help(AboutInfo.companyURL)
+                        .buttonStyle(.plain).focusEffectDisabled().help(AboutInfo.companyURL) // no blue keyboard-focus ring
                 }
                 ForEach(Array(AboutInfo.credits().enumerated()), id: \.offset) { _, line in
                     Text(attributed(line)).font(.body).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
