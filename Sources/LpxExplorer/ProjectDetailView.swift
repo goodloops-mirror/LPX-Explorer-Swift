@@ -170,7 +170,11 @@ struct ProjectDetailView: View {
         Form {
             Section { CompatibilityBand(summary: summary) }
             if let image = summary.alternatives.first(where: { $0.index == selectedVariant })?.windowImagePath {
-                Section { WindowImage(path: image) }
+                Section {
+                    WindowImage(path: image)
+                    Text("Snapshot from last save · \(RelativeDateTimeFormatter().localizedString(for: Date(timeIntervalSince1970: TimeInterval(summary.projectDataMTime)), relativeTo: Date()))")
+                        .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .center)
+                }
             }
             alternativesSection
             Section {
@@ -192,11 +196,15 @@ struct ProjectDetailView: View {
                         .buttonStyle(.link)
                 }
                 LabeledContent("Tracks", value: "\(m.trackCount)")
-                LabeledContent("Sample rate", value: m.sampleRate > 0 ? "\(m.sampleRate) Hz" : "—")
-                LabeledContent("Audio files", value: "\(m.audioFileCount)")
-                LabeledContent("Size", value: ByteCountFormatter.string(fromByteCount: Int64(summary.stats.sizeBytes), countStyle: .file))
+                LabeledContent("Sample rate", value: MetadataFormat.sampleRate(hz: m.sampleRate))
+                if let frameRate = MetadataFormat.frameRate(index: m.frameRateIndex) { LabeledContent("Frame rate", value: frameRate) }
+                LabeledContent("Created", value: MetadataFormat.dateWithRelative(unix: summary.stats.createdAt))
+                LabeledContent("Modified", value: MetadataFormat.dateWithRelative(unix: summary.stats.modifiedAt))
                 LabeledContent("Last saved", value: Date(timeIntervalSince1970: TimeInterval(summary.projectDataMTime)).formatted(date: .abbreviated, time: .shortened))
                 if let v = summary.lastSavedFrom { LabeledContent("Saved with", value: v) }
+                LabeledContent("Bundle size", value: ByteCountFormatter.string(fromByteCount: Int64(summary.stats.sizeBytes), countStyle: .file))
+                LabeledContent("Audio files", value: "\(m.audioFileCount)")
+                if m.impulseResponseCount > 0 { LabeledContent("Impulse responses", value: "\(m.impulseResponseCount)") }
             }
             if !ProjectBundle.hasInformationPlist(url) {
                 Section { Label("This project has no ProjectInformation.plist; Logic may refuse to open it.", systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }

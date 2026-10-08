@@ -6,6 +6,9 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+### Added
+- Inspector metadata now matches what the original app showed: frame rate, created and modified dates (with "3 days ago"), impulse responses, sample rate in kHz, "Bundle size", and a "Snapshot from last save" caption under the window image. The project list also shows each project's folder.
+
 ## [0.5.0] - 2026-10-08
 
 - The app is now GPL-3.0-or-later (`LICENSE`), with a licence/credits section in the README, the About window's acknowledgement of the original author (Rhyd Lewis), and "coming soon" placeholders for the source repository and Buy Me a Coffee links (set them in `AboutInfo`).

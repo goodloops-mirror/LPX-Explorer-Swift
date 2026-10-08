@@ -185,6 +185,8 @@ struct ProjectRow: View {
             if let e = entry {
                 Text("\(Int(e.metadata.bpm.rounded())) BPM · \(e.visibleTrackCount) tracks · \(e.plugins.count) plug-ins")
                     .font(.caption).foregroundStyle(.secondary)
+                Text(URL(fileURLWithPath: path).deletingLastPathComponent().path)
+                    .font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
             } else if model.errors[path] != nil {
                 Label("Can't read", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
             } else {
