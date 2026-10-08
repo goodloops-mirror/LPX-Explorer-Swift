@@ -6,6 +6,9 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+### Added
+- App icon (`Graphics/Icons/`); `make-app.sh` builds `AppIcon.icns` from the 1024 px PNG.
+
 ## [0.3.0] - 2026-10-08
 
 ### Changed
