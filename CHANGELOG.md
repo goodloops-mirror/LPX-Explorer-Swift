@@ -7,6 +7,7 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 ## [Unreleased]
 
 ### Fixed
+- The search fields above the project list keep their focus when the first letter switches the list to the results (the field bar is no longer rebuilt with the swapped view).
 - The player is a strip of its own at the bottom of the window instead of an overlay on the content.
 - File names are never cut short any more: the player, the bounce and audio lists and the project list show them in full (wrapping when needed); stems show their label and the complete file name.
 

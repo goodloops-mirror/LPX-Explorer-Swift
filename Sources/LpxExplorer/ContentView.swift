@@ -276,10 +276,14 @@ struct MiddlePane: View {
     @Environment(LibraryModel.self) private var model
 
     var body: some View {
-        Group {
-            if model.isSearching { SearchResultsView() } else { ProjectListView() }
+        // The bar is a sibling of the list, not an inset attached to it: typing the first letter swaps the project list for the
+        // results view, and a bar attached to the swapped view was rebuilt with it, which dropped the text field's focus.
+        VStack(spacing: 0) {
+            SearchFilterBar()
+            Group {
+                if model.isSearching { SearchResultsView() } else { ProjectListView() }
+            }
         }
-        .safeAreaInset(edge: .top, spacing: 0) { SearchFilterBar() }
     }
 }
 
@@ -377,17 +381,34 @@ struct TrackHitRow: View {
 
 /// Field filters for drilling down: every field narrows the same result list.
 struct SearchFilterBar: View {
+    private func restoreIfLostBySwap() {
+        guard let field = lastFocus, focus == nil, abs(lostFocusAt.timeIntervalSince(swappedAt)) < 0.3 else { return }
+        lostFocusAt = .distantPast
+        DispatchQueue.main.async { focus = field }
+    }
+
     @Environment(LibraryModel.self) private var model
+    private enum Field { case project, name, plugin }
+    @FocusState private var focus: Field?
+    /// The field being typed in. If it loses focus at the very moment the project list is swapped for the results (or back),
+    /// it is given back — but never when focus left for another reason (a click elsewhere, the toolbar's search box).
+    @State private var lastFocus: Field?
+    @State private var lostFocusAt = Date.distantPast
+    @State private var swappedAt = Date.distantPast
 
     var body: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                TextField("Project name", text: $model.filters.project)
-                TextField("Track / object name", text: $model.filters.name)
-                TextField("Plug-in", text: $model.filters.plugin)
+                TextField("Project name", text: $model.filters.project).focused($focus, equals: .project)
+                TextField("Track / object name", text: $model.filters.name).focused($focus, equals: .name)
+                TextField("Plug-in", text: $model.filters.plugin).focused($focus, equals: .plugin)
             }
             .textFieldStyle(.roundedBorder)
+            .onChange(of: focus) { _, new in
+                if let new { lastFocus = new } else { lostFocusAt = Date(); restoreIfLostBySwap() }
+            }
+            .onChange(of: model.isSearching) { _, _ in swappedAt = Date(); restoreIfLostBySwap() }
             HStack(spacing: 6) {
                 ForEach(LibraryModel.SearchFilters.KindGroup.allCases) { g in
                     let on = model.filters.kinds.contains(g)
