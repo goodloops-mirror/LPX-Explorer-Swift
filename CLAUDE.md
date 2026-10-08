@@ -12,6 +12,10 @@ This is a rewrite of the original Tauri/React/Rust app, which is kept untouched 
 - **TDD, vertical slices.** One failing test → minimal code → repeat. Verify RED fails on missing *behaviour* (a stub returning empty), not on a compile error. Port the Rust tests in `legacy-tauri` alongside each Rust function.
 - No npm / node on this machine. Don't add JS tooling.
 
+## Releases
+
+Versions are git tags `vX.Y.Z` (semver; legacy Tauri tags `v0.0.x` are ignored); the app starts at v0.1.0. `CHANGELOG.md` keeps hand-written notes under *Unreleased*. `scripts/release.sh <major|minor|patch|X.Y.Z> [--dry-run]` runs the tests, writes the new CHANGELOG section (notes + commit subjects since the last tag, grouped by `feat:`/`fix:`/other), commits it and tags it — it never pushes. `scripts/version.sh` reads the version from the tags (used by `make-app.sh`); `scripts/test-release.sh` tests the scripts in a temp repo. Only cut a release when asked.
+
 ## Layout
 
 ```

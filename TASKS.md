@@ -1,4 +1,6 @@
-# Port status (Tauri → SwiftUI)
+# Tasks
+
+LPX Explorer is its own app now; the Tauri code in `legacy-tauri/` is only a format reference and a regression oracle (`scripts/make-golden.sh`). Releases are versioned with git tags and recorded in `CHANGELOG.md` (`scripts/release.sh`).
 
 `bd` is not installed here; track work in this file until it is.
 
@@ -13,8 +15,8 @@
 - [x] App: folder sidebar, project list, inspector (metadata, plug-ins by kind), scan banner, drag-and-drop, Reveal / Open in Logic
 - [x] Measured: 1500 synthetic 600 KB bundles scan in ~1.4 s (1 worker) → ~0.24 s (8 workers)
 
-- [x] `AppleStock`, `AppleDrummer`, `Regions`, `TrackRegistry`, `TrackFinder`, `TrackPipeline` — ported; **golden tests match the Rust parser exactly** on all 24 `example_projects` (12,677 channel strips, 2,152 AU refs, every registry/region record)
-- [x] Search matches track names (inspector Tracks section with "Show routing" toggle, like the original)
+- [x] `AppleStock`, `AppleDrummer`, `Regions`, `TrackRegistry`, `TrackFinder`, `TrackPipeline` — **golden tests reproduce the legacy Rust parser's output exactly** (regression net) on all 24 `example_projects` (12,677 channel strips, 2,152 AU refs, every registry/region record)
+- [x] Search matches track names (inspector Tracks section)
 - [x] Scan optimised with memchr jumps: ~6.4 → ~1.1 ms/MB of ProjectData; 24 projects / 944 MB: 1.14 s on 1 worker, 0.13 s on 14
 - [x] Summary stores only active user-visible tracks (+ routing strips with inserts): cache 66 → 26 KB/project
 
@@ -22,18 +24,18 @@
 - [x] Inspector: window screenshot, "Saved with Logic Pro …", missing-`ProjectInformation.plist` warning
 - [x] Audio inventory (`AudioInventory`): bounces / recordings / freeze files under root, `Media/` and every alternative; durations via AVFoundation; smart "hero" pick; in-app player (play/pause/scrub) and Reveal in Finder
   - NB: `example_projects/` contains **no audio files and only variant 000**, so these are covered by synthetic-bundle unit tests (incl. real generated WAVs) — not by golden data. Worth verifying by hand on a project that has bounces and multiple alternatives.
-  - Differs from the Rust app on purpose: CAF counts as previewable (AVFoundation plays it; the old limit was WebKit's).
+  - CAF counts as previewable (AVFoundation plays it).
 
 - [x] Compatibility verdict (`CompatibilityVerdict`): clean / N missing / will-not-open / unknown, shown as a band atop the inspector with a "Show what's missing" list (names + which tracks use each); warning marker on project rows
-  - Deliberate change from the Rust app: counts **unique** plug-ins, not instances.
+  - Counts **unique** plug-ins, not instances.
 - [x] Similarity filters (`SimilarityAxis`, `LibraryFilter`): click Key / Tempo / "Find similar" in the inspector → filter chip over the project list; "Missing plug-ins only" toggle
 - [x] ~~Investigate possible false "missing" plug-ins~~ **Fixed.** Cause: type tags occurring by chance inside base64/plist text blobs in ProjectData. `AUFinder` now rejects a candidate when the 8 bytes before the manufacturer and the 8 bytes after the subtype are all text. Evidence on `example_projects`: 114/114 false hits were text-surrounded, 0/1,439 real (installed) ones were; all 24 projects now say "Opens cleanly". Golden tests encode this (Swift = Rust minus text-blob hits; no installed plug-in is ever removed). Original note:: on `example_projects`, 49 unique plug-ins flagged missing on this Mac, 22 of them in a single project, several with noise-like 4CCs (e.g. `aumu/+WZw/Rik/`). The Rust parser reports the same fingerprints (golden-verified), so this is inherited behaviour. Needs ground truth: which of these projects really complain about missing plug-ins in Logic?
 - [ ] Key pivot is useless when the key was never set (Logic stores C major by default; all 24 examples say C major). Consider hiding the key pivot / treating default key as unknown.
 
 - [x] Plug-in rail: sidebar "Plug-ins" view — library-wide usage (projects / instances), install status, category facets + "M of N categorised", status filter, search by name or fingerprint, detail pane listing projects (click to jump), Search the Web / Copy Name
-  - `aumf` ("music effect", e.g. FabFilter Pro-Q 3) is now an **audio** effect in categories and the inspector grouping; the legacy app called it a MIDI effect. `Track.midiFx` still holds aumf+aumi (parser parity) — group by `typeCode` when presenting.
+  - `aumf` ("music effect", e.g. FabFilter Pro-Q 3) is now an **audio** effect in categories and the inspector grouping; `Track.midiFx` still holds aumf+aumi (kept so the golden tests match the oracle) — group by `typeCode` when presenting.
   - 20 of 63 plug-ins in the examples are "Uncategorised" (third-party names; the table only knows Apple stock plug-ins). **Decision: no keyword/heuristic categorisation** — the owner knows their plug-ins.
-- [ ] Per-project rail scope (the legacy rail also filtered the current project's plug-ins); only the library-wide view exists
+- [ ] Per-project rail scope (only the library-wide view exists)
 
 - [x] **SQLite cache** replaces the JSON file (`SummaryDatabase`): list entries in the background at launch (~0.3 s / 3,000 projects vs 2.2 s blocking), change detection from stamps only (4 ms), incremental saves (50 projects: 68 ms vs ~3 s), full summary loaded on selection (~2 ms). Also fixed: per-refresh list sort (512 ms → cached), plug-in rollup O(n²) (500 → 33 ms), search (159 → 4 ms per keystroke at 3,000 projects).
 - [x] **Local-only**: no Sparkle/network anywhere in the Swift app (`NoNetworkTests`); "Search the Web" removed; legacy Sparkle framework, signing tools, appcast/release scripts and workflow deleted (`legacy-tauri/README-LEGACY.md`)
@@ -63,15 +65,17 @@
 - [x] **Track list = Logic's arrangement** (`ArrangementList`, `NameTexts`, `TrackObjects`, `ArrangementTracks`, `TrackPipeline.tracks`): one track per 93-byte `karT` record in track order, hidden tracks, folders/banners, tracks without regions and several tracks per object all included; each track has its own name (its `qSxT` text, else the object's name), position, object name, hidden flag (bit 0x04 at record+43), and the channel strip + plug-ins of its object. The inspector shows `#`, Channel, Name (+ hidden marker and "Object: …" when a track's name differs from its object). Projects without a recognisable list fall back to the old filtered channel strips. Verified against the owner's screenshots (numbered project incl. two tracks on one object, *Alea v01* hidden rows 5–15 and summing stack, *Please Follow me v01* shared objects/folders/Harp 1 = Inst 61) and structurally on all 26 example projects (positions 1…N, no gaps). The earlier region-entry "position" heuristic (`TrackPositions`) was removed.
   - Known gaps: kind of tracks whose object has no channel strip we can link (summing stacks, "No Output" object tracks) is `.unknown`; the record's other bytes (type 1/5/10, UUID, remaining flags) are undecoded; `Stereo Out` output record and the trailing sentinel are skipped by rule (type byte 3 / index 0x7fffffff).
 
-## Open (port from `legacy-tauri/src-tauri/crates/lpx-parser/src/`)
-- [ ] Track hierarchy: the Rust parser never sets `parentOffset`/`subNumber` either; folders/stacks render flat
+- [x] **Library-wide track search**: one row per arrangement track in SQLite (`tracks`), results grouped by project with hidden tracks marked, click opens the project at the track; drill-down filters (project, track/object name, plug-in, kind, hidden); default columns 15 / 50 / 35 % with *Reset Column Widths*
+- [x] **Release process**: git tags `vX.Y.Z`, `CHANGELOG.md`, `scripts/release.sh`; the app bundle takes its version from the latest tag
+
+## Open
+- [ ] Track hierarchy: `parentOffset`/`subNumber` are never set; folders/stacks render flat
 - [ ] Golden tests take ~25 s (debug build); `swift test --filter` for quick runs
 - [ ] Waveform drawing for the audio player (currently a scrubber only)
 - [ ] Full-size window-image lightbox (currently opens in Preview on click)
 - [ ] Visual QA of Alternatives / Audio sections with a project that actually has them
-- [ ] Recents + menu, sort options, Export README
+- [ ] Recents + menu, sort options
 - [ ] Worker-count tuning: this Mac has 16 P + 4 E cores; 14 workers (70% of 20) measured *slower* than 8. Consider 70% of performance cores, or make it a setting.
 - [ ] Discovery speed: walking a whole home folder took ~52 s; consider `fts`/`getattrlistbulk` and skipping `~/Library`, `.Trash`, node_modules-like dirs.
 - [ ] Pause/resume (current UI only has Stop; rescan resumes via cache)
-- [ ] Sparkle-free update story (local use: none needed)
 - [ ] Visual QA of the SwiftUI views (built and launch-tested, not yet eyeballed)
