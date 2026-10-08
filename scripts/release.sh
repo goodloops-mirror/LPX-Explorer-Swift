@@ -64,7 +64,7 @@ if [ -z "$manual$added$fixed$changed" ]; then echo "nothing to release since ${p
 echo "Releasing $tag (was ${prev_tag:-none})"; echo; printf '%s\n' "$section"
 [ "$dry" = 1 ] && { echo "(dry run: nothing changed)"; exit 0; }
 
-if [ "$skip_tests" = 0 ] && [ -z "${LPX_RELEASE_REPO:-}" ]; then swift test 2>&1 | tail -3; fi
+if [ "$skip_tests" = 0 ] && [ -z "${LPX_RELEASE_REPO:-}" ]; then swift test 2>&1 | grep -E "Executed [0-9]+ tests" | tail -1; fi
 
 # Rewrite CHANGELOG: empty [Unreleased] on top, the new section below it, older sections untouched.
 tmp="$(mktemp)"; sec="$(mktemp)"
