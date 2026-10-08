@@ -6,6 +6,8 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-08
+
 ### Changed
 - Search results are a list of matching projects, each followed by the tracks/objects inside it that matched. The toolbar search box matches everything (project, track, object and channel names, plug-ins); the three fields above the list match only their own field (project names / track and object names / plug-ins), and everything typed must match. The fields are always visible above the project list; typing in any of them switches to the library-wide results.
 
@@ -18,6 +20,15 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 - Projects that failed to parse are remembered (with their file stamp) and retried only when the file changes.
 - Changing the track-search table layout rebuilds it from the stored summaries instead of re-parsing the whole library.
 - The app says so when it cannot open its library database (it would otherwise re-read everything at every launch).
+
+### Fixed
+- search projects by track names and plug-ins again
+
+### Changed
+- Make the whole track result row clickable
+- Make search results project-centric with per-field filters
+- Only parse new or changed projects at launch
+- Package releases as a zip; version follows the checked-out commit
 
 ## [0.2.0] - 2026-10-08
 
