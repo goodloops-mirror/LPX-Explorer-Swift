@@ -88,7 +88,7 @@ struct ProjectDetailView: View {
             }
             ForEach(tracks, id: \.offset) { t in
                 let name = t.displayName
-                let focused = model.focusedTrack?.path == summary.path && t.position != nil && model.focusedTrack?.position == t.position
+                let focused = model.focusedTrack?.path == summary.path && model.focusedTrack?.offset == t.offset
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(t.position.map(String.init) ?? "—")
                         .font(.body.monospacedDigit()).foregroundStyle(t.position == nil ? .tertiary : .primary)
@@ -152,13 +152,13 @@ struct ProjectDetailView: View {
 
     private func scrollToFocusedTrack(_ proxy: ScrollViewProxy) {
         guard let f = model.focusedTrack, f.path == summary.path,
-              let t = summary.tracks.first(where: { $0.position == f.position }) else { return }
+              let t = summary.tracks.first(where: { $0.offset == f.offset }) else { return }
         // The Form lays out lazily and row heights vary (plug-in lines), so the first jump can land short of
         // rows that aren't realised yet. Repeat it as the layout settles; each pass starts closer.
         Task {
             for delay in [120, 350, 800] {
                 try? await Task.sleep(for: .milliseconds(delay))
-                guard !Task.isCancelled, model.focusedTrack?.position == f.position else { return }
+                guard !Task.isCancelled, model.focusedTrack?.offset == f.offset else { return }
                 withAnimation { proxy.scrollTo(t.offset, anchor: .center) }
             }
         }
@@ -220,7 +220,7 @@ struct ProjectDetailView: View {
         }
         .formStyle(.grouped)
         .task(id: base.path) { variantSummary = nil; variantError = nil }
-        .task(id: model.focusedTrack?.position) { scrollToFocusedTrack(proxy) }
+        .task(id: model.focusedTrack?.offset) { scrollToFocusedTrack(proxy) }
         .navigationTitle(LibraryModel.projectName(summary.path))
         .navigationSubtitle(url.deletingLastPathComponent().path)
         .toolbar {

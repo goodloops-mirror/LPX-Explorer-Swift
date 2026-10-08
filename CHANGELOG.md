@@ -6,6 +6,10 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+### Fixed
+- Search finds projects again by track names, object names and plug-ins, not just project names: projects that match as a whole are listed even without per-track rows (the field filters apply to them too).
+- Projects whose arrangement list couldn't be read (channel strips without track numbers) are now searchable per track; the results footer says when per-track results don't cover every project.
+
 ### Changed
 - Launch only stats the projects' ProjectData and parses what is new or modified; with nothing changed there is no progress bar and no parsing. The banner now reads "Updating N new or changed projects".
 - Projects that failed to parse are remembered (with their file stamp) and retried only when the file changes.

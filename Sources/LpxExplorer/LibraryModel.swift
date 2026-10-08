@@ -54,8 +54,10 @@ final class LibraryModel {
     /// Library-wide track search (while `query` is non-empty): matching tracks, and projects matched by name alone.
     private(set) var trackResults = TrackSearchResult(hits: [], total: 0)
     private(set) var projectNameMatches: [String] = []
+    /// How many projects have per-track search rows (the rest only match as a whole).
+    private(set) var trackIndexedProjects: Int?
     /// Track to scroll to / highlight in the inspector after a result was clicked.
-    var focusedTrack: (path: String, position: Int)?
+    var focusedTrack: (path: String, offset: Int)?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     static let searchLimit = 500
     /// "Find similar" pivot (key / tempo); applies to the selected folder.
@@ -79,6 +81,8 @@ final class LibraryModel {
     private var unsavedSummaries: [String: ProjectSummary] = [:]
     @ObservationIgnored private var sortedByFolder: [String: [String]] = [:]
     @ObservationIgnored private var haystacks: [String: String] = [:]
+    @ObservationIgnored private var pluginTexts: [String: String] = [:]
+    @ObservationIgnored private var foldedNames: [String: String] = [:]
     @ObservationIgnored private var foldedPluginNames: [String: String] = [:]
     @ObservationIgnored private var haystackRegistryVersion = -1
     private var started = false
@@ -254,6 +258,7 @@ final class LibraryModel {
                 entries[s.path] = ProjectListEntry(summary: s)
                 errors[s.path] = nil
                 haystacks[s.path] = nil
+                pluginTexts[s.path] = nil
                 unsavedSummaries[s.path] = s
                 fresh.append(s)
             case .failed(let path, let message):
@@ -350,13 +355,16 @@ final class LibraryModel {
             q.hidden = f.hidden
             let result = (try? await self.db?.searchTracks(q, limit: Self.searchLimit)) ?? TrackSearchResult(hits: [], total: 0)
             guard !Task.isCancelled else { return }
-            // Projects matched by name alone: only while nothing narrows at track level.
-            let nameTerms = q.terms + q.projectTerms
-            let trackLevel = !q.nameTerms.isEmpty || !q.pluginTerms.isEmpty || !q.kinds.isEmpty
-            let nameMatches = trackLevel || nameTerms.isEmpty ? [] :
-                self.entries.keys.filter { SearchMatcher.matches(haystack: SearchMatcher.fold(Self.projectName($0)), terms: nameTerms) }
-                    .sorted { Self.projectName($0).localizedStandardCompare(Self.projectName($1)) == .orderedAscending }
+            // Projects that match as a whole (name, any track/object name, any plug-in) but have no track row listed below.
+            let pq = ProjectSearch.Query(terms: q.terms, projectTerms: q.projectTerms, nameTerms: q.nameTerms, pluginTerms: q.pluginTerms,
+                                         restrictsTracks: !q.kinds.isEmpty || q.hidden != .include)
+            let listed = Set(result.hits.map(\.path))
+            self.refreshProjectTexts()
+            let nameMatches = pq.restrictsTracks ? [] : self.entries.filter { path, entry in
+                !listed.contains(path) && ProjectSearch.matches(pq, entry: entry, projectName: self.foldedProjectName(path), pluginText: self.pluginText(path, entry))
+            }.keys.sorted { Self.projectName($0).localizedStandardCompare(Self.projectName($1)) == .orderedAscending }
             self.trackResults = result
+            self.trackIndexedProjects = (try? await self.db?.trackIndexedProjectCount()) ?? nil
             self.projectNameMatches = nameMatches
         }
     }
@@ -367,9 +375,9 @@ final class LibraryModel {
     }
 
     /// Open a search result: select its project and ask the inspector to show the track.
-    func showTrack(path: String, position: Int) {
+    func showTrack(path: String, offset: Int) {
         showProject(path)
-        focusedTrack = (path, position)
+        focusedTrack = (path, offset)
     }
 
     static func projectName(_ path: String) -> String {
@@ -401,6 +409,34 @@ final class LibraryModel {
             guard let entry = entries[path] else { return SearchMatcher.matches(haystack: SearchMatcher.fold(Self.projectName(path)), terms: terms) }
             return SearchMatcher.matches(haystack: haystack(for: path, entry), terms: terms)
         }
+    }
+
+    /// Folded plug-in names / project names for the project-level search, cached until the plug-in registry changes.
+    private func refreshProjectTexts() {
+        if haystackRegistryVersion != registry.version {
+            haystacks.removeAll(keepingCapacity: true)
+            foldedPluginNames.removeAll(keepingCapacity: true)
+            pluginTexts.removeAll(keepingCapacity: true)
+            haystackRegistryVersion = registry.version
+        }
+    }
+
+    private func foldedProjectName(_ path: String) -> String {
+        if let n = foldedNames[path] { return n }
+        let n = SearchMatcher.fold(Self.projectName(path)); foldedNames[path] = n; return n
+    }
+
+    private func pluginText(_ path: String, _ entry: ProjectListEntry) -> String {
+        if let t = pluginTexts[path] { return t }
+        let names = entry.plugins.map { use -> String in
+            if let cached = foldedPluginNames[use.fingerprint] { return cached }
+            let folded = SearchMatcher.fold(registry.name(for: use.ref))
+            foldedPluginNames[use.fingerprint] = folded
+            return folded
+        }
+        let t = names.joined(separator: "\n")
+        pluginTexts[path] = t
+        return t
     }
 
     /// Folded static text (name, tracks, alternatives) plus the folded names of the plug-ins used.

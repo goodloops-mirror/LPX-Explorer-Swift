@@ -13,6 +13,7 @@ final class TrackSearchRowTests: XCTestCase {
         let t = Track(name: "Audio 7", userName: "Swéll Pad", kind: .audio, offset: 5, isActive: true, audioFx: [stock, third, stock],
                       position: 12, objectName: "Old Strings Object", isHidden: true)
         let row = TrackSearchRow.rows(for: summary(tracks: [t])).first
+        XCTAssertEqual(row?.offset, 5)
         XCTAssertEqual(row?.path, "/Music/Café Song.logicx")
         XCTAssertEqual(row?.position, 12)
         XCTAssertEqual(row?.kind, .audio)
@@ -28,9 +29,14 @@ final class TrackSearchRowTests: XCTestCase {
         XCTAssertEqual(row?.projectText, "cafe song")
     }
 
-    func testTracksWithoutAnArrangementPositionAreNotIndexed() {
-        let strip = Track(name: "Audio 1", kind: .audio, offset: 1, isActive: true)   // fallback channel-strip view, no number
-        XCTAssertTrue(TrackSearchRow.rows(for: summary(tracks: [strip])).isEmpty)
+    func testChannelStripsWithoutANumberAreIndexedButRoutingStripsAreNot() {
+        let audio = Track(name: "Audio 1", userName: "Lead Vox", kind: .audio, offset: 11, isActive: true)   // fallback view: no number
+        let aux = Track(name: "Aux 1", kind: .aux, offset: 12, isActive: true)
+        let master = Track(name: "Stereo Out", kind: .output, offset: 13, isActive: true)
+        let rows = TrackSearchRow.rows(for: summary(tracks: [audio, aux, master]))
+        XCTAssertEqual(rows.map(\.name), ["Lead Vox"])
+        XCTAssertNil(rows.first?.position)
+        XCTAssertEqual(rows.first?.offset, 11)
     }
 
     func testDefaultNamedTrackUsesItsChannelAsDisplayName() {
@@ -75,7 +81,7 @@ final class TrackSearchDatabaseTests: XCTestCase {
 
     func testPartialCaseInsensitiveMatchOnTrackNameAcrossProjects() async throws {
         let r = try await search(try await library(), "SWELL")
-        XCTAssertEqual(r.hits.map { "\($0.path.split(separator: "/").last!)#\($0.position)" }, ["Summer Anthem.logicx#2", "Winter Mix.logicx#2"])
+        XCTAssertEqual(r.hits.map { "\($0.path.split(separator: "/").last!)#\($0.position ?? 0)" }, ["Summer Anthem.logicx#2", "Winter Mix.logicx#2"])
         XCTAssertEqual(r.total, 2)
         let hit = try XCTUnwrap(r.hits.first)
         XCTAssertEqual(hit.name, "Swell Strings"); XCTAssertEqual(hit.objectName, "Strings Object")
@@ -252,5 +258,65 @@ final class TrackSearchDatabaseTests: XCTestCase {
         q.hidden = .only
         let only = try await db.searchTracks(q, limit: 50)
         XCTAssertEqual(names(only), ["Summer:Lead Vox"])
+    }
+
+    func testIndexedProjectCountCountsProjectsWithTrackRows() async throws {
+        let db = try SummaryDatabase(url: try dbURL())
+        try await db.upsert([project("/m/A.logicx", [track(1, "x"), track(2, "y")]), project("/m/B.logicx", [track(1, "z")]), project("/m/Empty.logicx", [])])
+        let n = try await db.trackIndexedProjectCount()
+        XCTAssertEqual(n, 2)
+    }
+
+    func testUnnumberedTracksAreSearchableAndSortAfterNumberedOnes() async throws {
+        let db = try SummaryDatabase(url: try dbURL())
+        let unnumbered = Track(name: "Audio 4", userName: "Pad Strip", kind: .audio, offset: 40, isActive: true)
+        try await db.upsert([project("/m/P.logicx", [unnumbered, track(2, "Pad Numbered")])])
+        let r = try await search(db, "pad")
+        XCTAssertEqual(r.hits.map(\.name), ["Pad Numbered", "Pad Strip"])
+        XCTAssertEqual(r.hits.map(\.position), [2, nil])
+        XCTAssertEqual(r.hits.last?.offset, 40)
+    }
+}
+
+final class ProjectSearchTests: XCTestCase {
+    private func entry() -> ProjectListEntry {
+        let t = Track(name: "Audio 1", userName: "Cymbal Swell", kind: .audio, offset: 1, isActive: true, objectName: "Crash Object")
+        let s = ProjectSummary(path: "/m/Winter Mix.logicx", fingerprints: [], tracks: [t], metadata: ProjectMetadata(),
+                               stats: BundleStats(sizeBytes: 0, createdAt: 0, modifiedAt: 0), projectDataMTime: 1, projectDataSize: 1)
+        return ProjectListEntry(summary: s)
+    }
+    private func hit(_ q: ProjectSearch.Query, plugins: String = "fabfilter pro-q 3\nchannel eq") -> Bool {
+        ProjectSearch.matches(q, entry: entry(), projectName: "winter mix", pluginText: plugins)
+    }
+
+    func testFreeTermsMatchProjectTrackObjectAndPluginNames() {
+        XCTAssertTrue(hit(.init(terms: ["winter"])))
+        XCTAssertTrue(hit(.init(terms: ["cymbal"])))
+        XCTAssertTrue(hit(.init(terms: ["crash"])))
+        XCTAssertTrue(hit(.init(terms: ["pro-q"])))
+        XCTAssertFalse(hit(.init(terms: ["trumpet"])))
+    }
+
+    func testEveryFreeTermMustMatchSomewhere() {
+        XCTAssertTrue(hit(.init(terms: ["winter", "swell", "pro-q"])))
+        XCTAssertFalse(hit(.init(terms: ["winter", "trumpet"])))
+    }
+
+    func testFieldFiltersLookInTheirOwnField() {
+        XCTAssertTrue(hit(.init(projectTerms: ["winter"])))
+        XCTAssertFalse(hit(.init(projectTerms: ["cymbal"])))
+        XCTAssertTrue(hit(.init(nameTerms: ["cymbal"])))
+        XCTAssertTrue(hit(.init(pluginTerms: ["pro-q"])))
+        XCTAssertFalse(hit(.init(pluginTerms: ["cymbal"])))
+        XCTAssertTrue(hit(.init(terms: ["swell"], projectTerms: ["winter"], pluginTerms: ["channel"])))
+        XCTAssertFalse(hit(.init(projectTerms: ["winter"], pluginTerms: ["trumpet"])))
+    }
+
+    func testTrackRestrictionsExcludeProjects() {
+        XCTAssertFalse(hit(.init(terms: ["winter"], restrictsTracks: true)))
+    }
+
+    func testEmptyQueryMatchesNothing() {
+        XCTAssertFalse(hit(.init()))
     }
 }

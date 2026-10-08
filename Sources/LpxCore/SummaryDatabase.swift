@@ -27,7 +27,7 @@ public actor SummaryDatabase {
     /// Wipes everything (a full re-parse) when bumped: only for changes to `entries` / `details` / `failures`.
     private static let schemaVersion = 3
     /// Layout/content of the derived `tracks` table. Bumping it rebuilds that table from `details` (no re-parse).
-    private static let tracksVersion = 1
+    private static let tracksVersion = 2
     // SQLite must copy bound text/blobs: Swift's temporary buffers are gone after the bind call returns.
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -86,8 +86,8 @@ public actor SummaryDatabase {
 
     private func insertTrackRows(for s: ProjectSummary) throws {
         for r in TrackSearchRow.rows(for: s) {
-            try run("INSERT INTO tracks(path, position, kind, hidden, name, object_name, channel, text, plugin_text, fingerprints, project_text) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                    [.text(r.path), .int(Int64(r.position)), .text(r.kind.rawValue), .int(r.isHidden ? 1 : 0), .text(r.name),
+            try run("INSERT INTO tracks(path, position, track_offset, kind, hidden, name, object_name, channel, text, plugin_text, fingerprints, project_text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    [.text(r.path), r.position.map { Bind.int(Int64($0)) } ?? .null, .int(Int64(r.offset)), .text(r.kind.rawValue), .int(r.isHidden ? 1 : 0), .text(r.name),
                      .text(r.objectName), .text(r.channel), .text(r.text), .text(r.pluginText), .text(r.fingerprints), .text(r.projectText)])
         }
     }
@@ -215,10 +215,11 @@ public actor SummaryDatabase {
             conditions.append("(" + any.map(\.sql).joined(separator: " OR ") + ")")
             for m in any { binds += m.binds }
         }
-        let sql = "SELECT id, path, position FROM tracks WHERE " + conditions.joined(separator: " AND ")
-        var matches: [(id: Int64, path: String, position: Int)] = []
+        let sql = "SELECT id, path, position, track_offset FROM tracks WHERE " + conditions.joined(separator: " AND ")
+        var matches: [(id: Int64, path: String, position: Int, offset: Int)] = []
         try self.query(sql, binds: binds) { stmt in
-            matches.append((sqlite3_column_int64(stmt, 0), text(stmt, 1), Int(sqlite3_column_int64(stmt, 2))))
+            let pos = sqlite3_column_type(stmt, 2) == SQLITE_NULL ? Int.max : Int(sqlite3_column_int64(stmt, 2)) // unnumbered tracks sort last
+            matches.append((sqlite3_column_int64(stmt, 0), text(stmt, 1), pos, Int(sqlite3_column_int64(stmt, 3))))
         }
         var nameCache: [String: String] = [:]
         func projectName(_ path: String) -> String {
@@ -230,16 +231,17 @@ public actor SummaryDatabase {
                 let order = projectName(a.path).localizedStandardCompare(projectName(b.path))
                 return order == .orderedSame ? a.path < b.path : order == .orderedAscending
             }
-            return a.position < b.position
+            return a.position != b.position ? a.position < b.position : a.offset < b.offset
         }
         let page = Array(matches.prefix(max(0, limit)))
         var hits: [TrackHit] = []
         for m in page {
-            try self.query("SELECT path, position, kind, hidden, name, object_name, channel, fingerprints FROM tracks WHERE id = ?", binds: [.int(m.id)]) { stmt in
-                let fps = text(stmt, 7).split(separator: "|").map(String.init)
-                hits.append(TrackHit(path: text(stmt, 0), position: Int(sqlite3_column_int64(stmt, 1)), kind: TrackKind(rawValue: text(stmt, 2)) ?? .unknown,
-                                     isHidden: sqlite3_column_int64(stmt, 3) != 0, name: text(stmt, 4), objectName: text(stmt, 5),
-                                     channel: text(stmt, 6), pluginFingerprints: fps))
+            try self.query("SELECT path, position, track_offset, kind, hidden, name, object_name, channel, fingerprints FROM tracks WHERE id = ?", binds: [.int(m.id)]) { stmt in
+                let fps = text(stmt, 8).split(separator: "|").map(String.init)
+                let position: Int? = sqlite3_column_type(stmt, 1) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(stmt, 1))
+                hits.append(TrackHit(path: text(stmt, 0), position: position, offset: Int(sqlite3_column_int64(stmt, 2)),
+                                     kind: TrackKind(rawValue: text(stmt, 3)) ?? .unknown, isHidden: sqlite3_column_int64(stmt, 4) != 0,
+                                     name: text(stmt, 5), objectName: text(stmt, 6), channel: text(stmt, 7), pluginFingerprints: fps))
             }
         }
         return TrackSearchResult(hits: hits, total: matches.count)
@@ -267,6 +269,13 @@ public actor SummaryDatabase {
         return out
     }
 
+    /// Number of projects that have at least one searchable track row.
+    public func trackIndexedProjectCount() throws -> Int {
+        var n = 0
+        try query("SELECT COUNT(DISTINCT path) FROM tracks") { n = Int(sqlite3_column_int64($0, 0)) }
+        return n
+    }
+
     public func count() throws -> Int {
         var n = 0
         try query("SELECT COUNT(*) FROM entries") { n = Int(sqlite3_column_int64($0, 0)) }
@@ -280,7 +289,7 @@ public actor SummaryDatabase {
 
     // MARK: SQLite plumbing
 
-    private enum Bind { case text(String), int(Int64), blob(Data) }
+    private enum Bind { case text(String), int(Int64), blob(Data), null }
 
     private static func openAndPrepare(_ url: URL, _ parserVersion: Int) throws -> OpaquePointer {
         var handle: OpaquePointer?
@@ -304,7 +313,7 @@ public actor SummaryDatabase {
             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS entries(path TEXT PRIMARY KEY, pd_mtime INTEGER NOT NULL, pd_size INTEGER NOT NULL, entry BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS details(path TEXT PRIMARY KEY, summary BLOB NOT NULL);
-            CREATE TABLE IF NOT EXISTS tracks(id INTEGER PRIMARY KEY, path TEXT NOT NULL, position INTEGER NOT NULL, kind TEXT NOT NULL, hidden INTEGER NOT NULL,
+            CREATE TABLE IF NOT EXISTS tracks(id INTEGER PRIMARY KEY, path TEXT NOT NULL, position INTEGER, track_offset INTEGER NOT NULL, kind TEXT NOT NULL, hidden INTEGER NOT NULL,
                 name TEXT NOT NULL, object_name TEXT NOT NULL, channel TEXT NOT NULL, text TEXT NOT NULL, plugin_text TEXT NOT NULL, fingerprints TEXT NOT NULL, project_text TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS failures(path TEXT PRIMARY KEY, pd_mtime INTEGER NOT NULL, pd_size INTEGER NOT NULL, message TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS tracks_path ON tracks(path);
@@ -349,6 +358,7 @@ public actor SummaryDatabase {
             switch b {
             case .text(let s): rc = sqlite3_bind_text(stmt, idx, s, -1, Self.transient)
             case .int(let v): rc = sqlite3_bind_int64(stmt, idx, v)
+            case .null: rc = sqlite3_bind_null(stmt, idx)
             case .blob(let d): rc = d.withUnsafeBytes { sqlite3_bind_blob(stmt, idx, $0.baseAddress, Int32(d.count), Self.transient) }
             }
             guard rc == SQLITE_OK else { throw DatabaseError.sqlite(String(cString: sqlite3_errmsg(db))) }

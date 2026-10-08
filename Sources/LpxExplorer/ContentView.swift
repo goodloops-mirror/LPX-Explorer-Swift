@@ -286,20 +286,24 @@ struct SearchResultsView: View {
         let nameOnly = model.projectNameMatches
         List(selection: $model.selectedProject) {
             if !nameOnly.isEmpty {
-                Section("Projects (\(nameOnly.count))") {
+                Section("Projects matching as a whole (\(nameOnly.count))") {
                     ForEach(nameOnly, id: \.self) { path in ProjectRow(path: path).tag(path) }
                 }
             }
             ForEach(groups) { g in
                 Section {
-                    ForEach(g.hits, id: \.position) { h in
+                    ForEach(g.hits, id: \.offset) { h in
                         TrackHitRow(hit: h, terms: SearchMatcher.terms(of: model.query))
                             .contentShape(Rectangle())
-                            .onTapGesture { model.showTrack(path: h.path, position: h.position) }
+                            .onTapGesture { model.showTrack(path: h.path, offset: h.offset) }
                     }
                 } header: {
                     Text(LibraryModel.projectName(g.path))
                 }
+            }
+            if let indexed = model.trackIndexedProjects, indexed < model.entries.count {
+                Text("Per-track results cover \(indexed) of \(model.entries.count) projects; the others can only match as a whole (name, track and plug-in names).")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if model.trackResults.total > model.trackResults.hits.count {
                 Text("Showing \(model.trackResults.hits.count) of \(model.trackResults.total) tracks — refine the search to see the rest.")
@@ -355,7 +359,7 @@ struct TrackHitRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("\(hit.position)").font(.body.monospacedDigit()).foregroundStyle(.secondary).frame(width: 32, alignment: .trailing)
+            Text(hit.position.map(String.init) ?? "—").font(.body.monospacedDigit()).foregroundStyle(.secondary).frame(width: 32, alignment: .trailing)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(highlighted(hit.name.isEmpty ? "—" : hit.name)).lineLimit(1)
