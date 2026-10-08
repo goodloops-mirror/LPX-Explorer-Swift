@@ -7,4 +7,6 @@ example_projects/
 Tests/Golden/
 scripts/oracle/target/
 scripts/oracle/Cargo.lock
-code_from_other_people/dist/
+code_from_other_people/
+dist/
+Graphics/

@@ -22,8 +22,8 @@ public enum AboutInfo {
 
     /// (When you set one, also add its URL to `allowedAboutURLs` in NoNetworkTests — the guard is deliberate.)
     /// Placeholders until the public mirror and the coffee page exist: set these and the About box shows the links.
-    public static let repositoryURL: String? = nil
-    public static let coffeeURL: String? = nil
+    public static let repositoryURL: String? = "https://github.com/goodloops-mirror/LPX-Explorer-Swift"
+    public static let coffeeURL: String? = "https://buymeacoffee.com/hanshafner"
 
     /// The version line: release number, commit count and — when it adds information — the exact build from `git describe`.
     /// Nothing known (e.g. `swift run`) reads "Development build".

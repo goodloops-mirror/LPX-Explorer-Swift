@@ -30,7 +30,11 @@ final class NoNetworkTests: XCTestCase {
     }
 
     /// Every external link the app may show (About box only). Adding one is a deliberate, reviewed change.
-    private static let allowedAboutURLs = ["https://www.good-loops.com"]
+    private static let allowedAboutURLs = [
+        "https://www.good-loops.com",
+        "https://github.com/goodloops-mirror/LPX-Explorer-Swift",
+        "https://buymeacoffee.com/hanshafner",
+    ]
 
     func testOnlyAboutInfoMayContainLinksAndOnlyAllowedOnes() throws {
         for (path, text) in try swiftSources() where !path.hasSuffix("/AboutInfo.swift") {
