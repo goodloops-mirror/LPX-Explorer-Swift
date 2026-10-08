@@ -6,6 +6,11 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-08
+
+### Changed
+- Show the XCTest summary in release.sh
+
 ## [0.1.0] - 2026-10-08
 
 First release of the native SwiftUI app.
