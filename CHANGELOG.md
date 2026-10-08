@@ -7,7 +7,7 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 ## [Unreleased]
 
 ### Added
-- About box: Good Loops branding and logo, acknowledgement of the original author (Rhyd Lewis), GPL-3.0-or-later notice, and placeholders for the source repository and Buy Me a Coffee links (shown as "coming soon" until configured in `AboutInfo`).
+- About window (resizable, shows the exact build): Good Loops branding and logo, acknowledgement of the original author (Rhyd Lewis), GPL-3.0-or-later notice, and placeholders for the source repository and Buy Me a Coffee links (shown as "coming soon" until configured in `AboutInfo`).
 - `LICENSE` (GPL-3.0-or-later) and a licence/credits section in the README.
 
 ## [0.4.0] - 2026-10-08

@@ -5,6 +5,7 @@ import SwiftUI
 struct LpxExplorerApp: App {
     @State private var registry: AuRegistry
     @State private var model: LibraryModel
+    @Environment(\.openWindow) private var openWindow
 
     init() {
         let registry = AuRegistry()
@@ -29,7 +30,7 @@ struct LpxExplorerApp: App {
         .defaultSize(width: 1500, height: 860)
         .commands {
             CommandGroup(replacing: .appInfo) {
-                Button("About LPX Explorer") { AboutPanel.show() }
+                Button("About LPX Explorer") { openWindow(id: "about") }
             }
             CommandGroup(after: .toolbar) {
                 Button("Reset Column Widths") { model.resetColumnWidths() }
@@ -39,5 +40,10 @@ struct LpxExplorerApp: App {
                 Button("Rescan Library") { model.rescanAll() }.keyboardShortcut("r")
             }
         }
+        Window("About LPX Explorer", id: "about") {
+            AboutView()
+        }
+        .defaultSize(width: 480, height: 640)
+        .windowResizability(.contentMinSize)
     }
 }

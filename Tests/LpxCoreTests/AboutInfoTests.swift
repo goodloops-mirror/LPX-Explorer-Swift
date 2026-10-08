@@ -39,3 +39,20 @@ final class AboutInfoTests: XCTestCase {
         XCTAssertFalse(all(lines).contains("coming soon"))
     }
 }
+
+final class AboutVersionTextTests: XCTestCase {
+    func testExactBuildIsShownWhenItDiffersFromTheRelease() {
+        XCTAssertEqual(AboutInfo.versionText(short: "0.4.0", build: "320", describe: "v0.4.0-1-g2f018f0-dirty"),
+                       "Version 0.4.0 · build 320 · v0.4.0-1-g2f018f0-dirty")
+    }
+
+    func testPlainReleaseDoesNotRepeatItself() {
+        XCTAssertEqual(AboutInfo.versionText(short: "0.4.0", build: "320", describe: "v0.4.0"), "Version 0.4.0 · build 320")
+    }
+
+    func testMissingPartsAreLeftOut() {
+        XCTAssertEqual(AboutInfo.versionText(short: "0.4.0", build: nil, describe: nil), "Version 0.4.0")
+        XCTAssertEqual(AboutInfo.versionText(short: nil, build: nil, describe: nil), "Development build")
+        XCTAssertEqual(AboutInfo.versionText(short: "", build: "", describe: ""), "Development build")
+    }
+}

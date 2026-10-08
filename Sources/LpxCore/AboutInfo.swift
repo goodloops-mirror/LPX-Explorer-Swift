@@ -25,6 +25,17 @@ public enum AboutInfo {
     public static let repositoryURL: String? = nil
     public static let coffeeURL: String? = nil
 
+    /// The version line: release number, commit count and — when it adds information — the exact build from `git describe`.
+    /// Nothing known (e.g. `swift run`) reads "Development build".
+    public static func versionText(short: String?, build: String?, describe: String?) -> String {
+        func clean(_ v: String?) -> String? { (v?.isEmpty ?? true) ? nil : v }
+        guard let short = clean(short) else { return "Development build" }
+        var parts = ["Version \(short)"]
+        if let build = clean(build) { parts.append("build \(build)") }
+        if let describe = clean(describe), describe != short, describe != "v" + short { parts.append(describe) }
+        return parts.joined(separator: " · ")
+    }
+
     public static func credits(repositoryURL: String? = AboutInfo.repositoryURL, coffeeURL: String? = AboutInfo.coffeeURL) -> [Line] {
         func optionalLink(_ lead: String, _ label: String, _ url: String?, soon: String) -> Line {
             if let url { return Line([Segment(lead), Segment(label, link: url)]) }
