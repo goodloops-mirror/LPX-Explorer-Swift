@@ -289,6 +289,7 @@ struct SearchResultsView: View {
                 ForEach(result.tracks, id: \.offset) { h in
                     TrackHitRow(hit: h, terms: terms, pluginTerms: SearchMatcher.terms(of: model.query) + SearchMatcher.terms(of: model.filters.plugin))
                         .padding(.leading, 18)
+                        .frame(maxWidth: .infinity, alignment: .leading) // the whole row is the click target, not just its text
                         .contentShape(Rectangle())
                         .onTapGesture { model.showTrack(path: h.path, offset: h.offset) }
                 }
