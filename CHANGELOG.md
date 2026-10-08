@@ -6,6 +6,8 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-08
+
 First release of the native SwiftUI app.
 
 ### Added
@@ -19,3 +21,4 @@ First release of the native SwiftUI app.
 
 ### Notes
 - Local only: no network requests, no updater. Never writes inside a project bundle.
+
