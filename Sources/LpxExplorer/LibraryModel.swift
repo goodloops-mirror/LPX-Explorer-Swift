@@ -284,21 +284,60 @@ final class LibraryModel {
 
     // MARK: search
 
-    var isSearching: Bool { !SearchMatcher.terms(of: query).isEmpty && !isPluginView }
+    /// Field filters above the results (all optional, all combined with the search box).
+    struct SearchFilters: Equatable {
+        enum KindGroup: String, CaseIterable, Identifiable {
+            case audio = "Audio", instrument = "Instrument", structure = "Folder / Stack"
+            var id: String { rawValue }
+            var kinds: Set<TrackKind> {
+                switch self { case .audio: [.audio]; case .instrument: [.instrument]; case .structure: [.folder, .summingStack] }
+            }
+        }
+        var project = ""
+        var name = ""
+        var plugin = ""
+        var kinds: Set<KindGroup> = []
+        var hidden: TrackSearchQuery.Visibility = .include
+        var isActive: Bool { self != SearchFilters() }
+        var hasText: Bool { !SearchMatcher.terms(of: project + " " + name + " " + plugin).isEmpty }
+    }
+
+    var filters = SearchFilters() { didSet { if oldValue != filters { scheduleSearch() } } }
+    /// Show the search panel even before anything is typed (so filters can be the starting point).
+    var searchPanelOpen = false { didSet { if oldValue != searchPanelOpen { scheduleSearch() } } }
+
+    var isSearching: Bool {
+        !isPluginView && (searchPanelOpen || !SearchMatcher.terms(of: query).isEmpty || filters.isActive)
+    }
+
+    func clearFilters() { filters = SearchFilters() }
 
     /// Re-run the library-wide search shortly after the last keystroke (and after a scan finished).
     func scheduleSearch() {
         searchTask?.cancel()
-        let text = query
-        guard !SearchMatcher.terms(of: text).isEmpty else { trackResults = TrackSearchResult(hits: [], total: 0); projectNameMatches = []; return }
+        let text = query, f = filters
+        let freeTerms = SearchMatcher.terms(of: text)
+        guard !freeTerms.isEmpty || f.hasText || !f.kinds.isEmpty else {
+            trackResults = TrackSearchResult(hits: [], total: 0); projectNameMatches = []; return
+        }
         searchTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled, let self else { return }
-            let q = TrackSearchQuery(text: text) { self.pluginFingerprints(matching: $0) }
+            var q = TrackSearchQuery(text: text) { self.pluginFingerprints(matching: $0) }
+            q.projectTerms = SearchMatcher.terms(of: f.project)
+            q.nameTerms = SearchMatcher.terms(of: f.name)
+            q.pluginTerms = SearchMatcher.terms(of: f.plugin)
+            q.pluginTermFingerprints = q.pluginTerms.map { self.pluginFingerprints(matching: $0) }
+            q.kinds = f.kinds.reduce(into: Set<TrackKind>()) { $0.formUnion($1.kinds) }
+            q.hidden = f.hidden
             let result = (try? await self.db?.searchTracks(q, limit: Self.searchLimit)) ?? TrackSearchResult(hits: [], total: 0)
             guard !Task.isCancelled else { return }
-            let nameMatches = self.entries.keys.filter { SearchMatcher.matches(haystack: SearchMatcher.fold(Self.projectName($0)), terms: q.terms) }
-                .sorted { Self.projectName($0).localizedStandardCompare(Self.projectName($1)) == .orderedAscending }
+            // Projects matched by name alone: only while nothing narrows at track level.
+            let nameTerms = q.terms + q.projectTerms
+            let trackLevel = !q.nameTerms.isEmpty || !q.pluginTerms.isEmpty || !q.kinds.isEmpty
+            let nameMatches = trackLevel || nameTerms.isEmpty ? [] :
+                self.entries.keys.filter { SearchMatcher.matches(haystack: SearchMatcher.fold(Self.projectName($0)), terms: nameTerms) }
+                    .sorted { Self.projectName($0).localizedStandardCompare(Self.projectName($1)) == .orderedAscending }
             self.trackResults = result
             self.projectNameMatches = nameMatches
         }

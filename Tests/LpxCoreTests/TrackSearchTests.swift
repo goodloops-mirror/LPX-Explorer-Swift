@@ -20,7 +20,9 @@ final class TrackSearchRowTests: XCTestCase {
         XCTAssertEqual(row?.name, "Swéll Pad")
         XCTAssertEqual(row?.objectName, "Old Strings Object")
         XCTAssertEqual(row?.channel, "Audio 7")
-        for needle in ["swell pad", "old strings object", "audio 7", "channel eq"] { XCTAssertTrue(row?.text.contains(needle) ?? false, needle) }
+        for needle in ["swell pad", "old strings object", "audio 7"] { XCTAssertTrue(row?.text.contains(needle) ?? false, needle) }
+        XCTAssertFalse(row?.text.contains("channel eq") ?? true, "plug-in names live in their own field")
+        XCTAssertEqual(row?.pluginText, "channel eq")
         XCTAssertFalse(row?.text.contains("fq3p") ?? true, "plug-ins the file doesn't name are found through the registry, not the text")
         XCTAssertEqual(row?.fingerprints, "|aufx/chan/appl|aufx/FQ3p/FabF|", "unique, in first-seen order")
         XCTAssertEqual(row?.projectText, "cafe song")
@@ -171,5 +173,84 @@ final class TrackSearchDatabaseTests: XCTestCase {
     func testEmptyQueryFindsNothing() async throws {
         let r = try await search(try await library(), "   ")
         XCTAssertTrue(r.hits.isEmpty); XCTAssertEqual(r.total, 0)
+    }
+
+    // MARK: field filters
+
+    private func filterLibrary() async throws -> SummaryDatabase {
+        let db = try SummaryDatabase(url: try dbURL())
+        let stock = AURef(typeCode: "aufx", subtype: "chan", manufacturer: "appl", offset: 0, displayName: "Channel EQ")
+        let proq = AURef(typeCode: "aufx", subtype: "FQ3p", manufacturer: "FabF", offset: 0)
+        try await db.upsert([
+            project("/m/Summer Anthem.logicx", [track(1, "Kick", fx: [stock]), track(2, "Swell Strings", object: "Strings Object", channel: "Inst 3", kind: .instrument, fx: [proq]),
+                                                track(3, "Lead Vox", hidden: true)]),
+            project("/m/Winter Mix.logicx", [track(1, "Kick"), track(2, "Vocal swell up"), track(3, "Swell Pad", channel: "Inst 1", kind: .instrument)]),
+        ])
+        return db
+    }
+
+    private func names(_ r: TrackSearchResult) -> [String] { r.hits.map { "\($0.path.split(separator: "/").last!.prefix(6)):\($0.name)" } }
+
+    func testKindFilterNarrowsFreeTerms() async throws {
+        let db = try await filterLibrary()
+        var q = TrackSearchQuery(terms: ["swell"]); q.kinds = [.instrument]
+        let inst = try await db.searchTracks(q, limit: 50)
+        XCTAssertEqual(names(inst), ["Summer:Swell Strings", "Winter:Swell Pad"])
+        q.kinds = [.audio]
+        let audio = try await db.searchTracks(q, limit: 50)
+        XCTAssertEqual(names(audio), ["Winter:Vocal swell up"])
+    }
+
+    func testKindAloneListsThoseTracks() async throws {
+        let db = try await filterLibrary()
+        var q = TrackSearchQuery(terms: []); q.kinds = [.instrument]
+        let r = try await db.searchTracks(q, limit: 50)
+        XCTAssertEqual(r.total, 2)
+    }
+
+    func testNameTermsOnlyLookAtTrackObjectAndChannelNames() async throws {
+        let db = try await filterLibrary()
+        var q = TrackSearchQuery(terms: []); q.nameTerms = ["channel"]
+        let none = try await db.searchTracks(q, limit: 50)
+        XCTAssertTrue(none.hits.isEmpty, "a plug-in called Channel EQ is not a track name")
+        q.nameTerms = ["strings"]
+        let some = try await db.searchTracks(q, limit: 50)
+        XCTAssertEqual(names(some), ["Summer:Swell Strings"])
+        let free = try await db.searchTracks(TrackSearchQuery(terms: ["channel"]), limit: 50)
+        XCTAssertEqual(names(free), ["Summer:Kick"], "free terms still find stock plug-in names")
+    }
+
+    func testProjectTermsNarrowButDoNotListTracksAlone() async throws {
+        let db = try await filterLibrary()
+        var q = TrackSearchQuery(terms: []); q.projectTerms = ["winter"]
+        let alone = try await db.searchTracks(q, limit: 50)
+        XCTAssertTrue(alone.hits.isEmpty)
+        q.nameTerms = ["kick"]
+        let both = try await db.searchTracks(q, limit: 50)
+        XCTAssertEqual(names(both), ["Winter:Kick"])
+    }
+
+    func testPluginTermsMatchStockNamesAndRegistryFingerprints() async throws {
+        let db = try await filterLibrary()
+        var q = TrackSearchQuery(terms: []); q.pluginTerms = ["channel eq"]; q.pluginTermFingerprints = [[]]
+        let stock = try await db.searchTracks(q, limit: 50)
+        XCTAssertEqual(names(stock), ["Summer:Kick"])
+        q.pluginTerms = ["pro-q"]; q.pluginTermFingerprints = [["aufx/FQ3p/FabF"]]
+        let reg = try await db.searchTracks(q, limit: 50)
+        XCTAssertEqual(names(reg), ["Summer:Swell Strings"])
+        q.nameTerms = ["kick"]
+        let none = try await db.searchTracks(q, limit: 50)
+        XCTAssertTrue(none.hits.isEmpty, "name and plug-in conditions must hold for the same track")
+    }
+
+    func testHiddenVisibility() async throws {
+        let db = try await filterLibrary()
+        var q = TrackSearchQuery(terms: ["lead"])
+        q.hidden = .exclude
+        let ex = try await db.searchTracks(q, limit: 50)
+        XCTAssertTrue(ex.hits.isEmpty)
+        q.hidden = .only
+        let only = try await db.searchTracks(q, limit: 50)
+        XCTAssertEqual(names(only), ["Summer:Lead Vox"])
     }
 }

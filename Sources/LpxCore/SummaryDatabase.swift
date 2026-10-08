@@ -15,7 +15,7 @@ public enum DatabaseError: Error, Equatable { case sqlite(String) }
 public actor SummaryDatabase {
     /// Bump when parser output changes so stale rows are discarded on the next launch.
     public static let parserVersion = 6
-    private static let schemaVersion = 2
+    private static let schemaVersion = 3
     // SQLite must copy bound text/blobs: Swift's temporary buffers are gone after the bind call returns.
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -80,9 +80,9 @@ public actor SummaryDatabase {
                 try run("INSERT OR REPLACE INTO details(path, summary) VALUES (?,?)", [.text(s.path), .blob(full)])
                 try run("DELETE FROM tracks WHERE path = ?", [.text(s.path)])
                 for r in TrackSearchRow.rows(for: s) {
-                    try run("INSERT INTO tracks(path, position, kind, hidden, name, object_name, channel, text, fingerprints, project_text) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    try run("INSERT INTO tracks(path, position, kind, hidden, name, object_name, channel, text, plugin_text, fingerprints, project_text) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                             [.text(r.path), .int(Int64(r.position)), .text(r.kind.rawValue), .int(r.isHidden ? 1 : 0), .text(r.name),
-                             .text(r.objectName), .text(r.channel), .text(r.text), .text(r.fingerprints), .text(r.projectText)])
+                             .text(r.objectName), .text(r.channel), .text(r.text), .text(r.pluginText), .text(r.fingerprints), .text(r.projectText)])
                 }
             }
             try exec("COMMIT")
@@ -108,30 +108,58 @@ public actor SummaryDatabase {
         }
     }
 
-    /// Tracks matching every term. A term matches a track's own text (track, object, channel, stock plug-in names), a plug-in
-    /// the registry resolved for it, or — for terms that aren't found at track level — the project's name; at least one term
-    /// must match at track level, so a project-name match alone isn't expanded into all of that project's tracks.
+    /// Tracks matching every condition of `query`.
+    /// - Free terms: each is found in the track's names, its plug-ins, or the project's name — and, unless a field filter
+    ///   already anchors the search at track level, at least one must match the track itself, so a project-name match
+    ///   alone isn't expanded into all of that project's tracks.
+    /// - Field filters (project / name / plug-in terms, kinds, hidden) all have to hold for the same track.
     /// Ordered by project name (natural) then track number; `limit` cuts the list, `total` counts every match.
     public func searchTracks(_ query: TrackSearchQuery, limit: Int) throws -> TrackSearchResult {
-        guard !query.isEmpty else { return TrackSearchResult(hits: [], total: 0) }
+        let anchored = !query.nameTerms.isEmpty || !query.pluginTerms.isEmpty || !query.kinds.isEmpty
+        guard !query.terms.isEmpty || anchored else { return TrackSearchResult(hits: [], total: 0) }
+
+        func pluginMatch(_ term: String, _ fps: [String]) -> (sql: String, binds: [Bind]) {
+            var sql = "instr(plugin_text, ?) > 0"
+            var b: [Bind] = [.text(term)]
+            for fp in fps { sql += " OR instr(fingerprints, ?) > 0"; b.append(.text("|" + fp + "|")) }
+            return ("(" + sql + ")", b)
+        }
+        // A free term at track level: names, stock plug-in names, or a registry-resolved plug-in.
         func trackMatch(_ i: Int) -> (sql: String, binds: [Bind]) {
-            var sql = "instr(text, ?) > 0"
-            var b: [Bind] = [.text(query.terms[i])]
-            for fp in i < query.pluginFingerprints.count ? query.pluginFingerprints[i] : [] {
-                sql += " OR instr(fingerprints, ?) > 0"
-                b.append(.text("|" + fp + "|"))
-            }
+            let fps = i < query.pluginFingerprints.count ? query.pluginFingerprints[i] : []
+            var sql = "instr(text, ?) > 0 OR instr(plugin_text, ?) > 0"
+            var b: [Bind] = [.text(query.terms[i]), .text(query.terms[i])]
+            for fp in fps { sql += " OR instr(fingerprints, ?) > 0"; b.append(.text("|" + fp + "|")) }
             return ("(" + sql + ")", b)
         }
         var binds: [Bind] = []
-        var all: [String] = [], any: [String] = []
+        var conditions: [String] = []
         for i in query.terms.indices {
             let m = trackMatch(i)
-            all.append("(" + m.sql + " OR instr(project_text, ?) > 0)")
+            conditions.append("(" + m.sql + " OR instr(project_text, ?) > 0)")
             binds += m.binds + [.text(query.terms[i])]
         }
-        for i in query.terms.indices { let m = trackMatch(i); any.append(m.sql); binds += m.binds }
-        let sql = "SELECT id, path, position FROM tracks WHERE " + all.joined(separator: " AND ") + " AND (" + any.joined(separator: " OR ") + ")"
+        for t in query.projectTerms { conditions.append("instr(project_text, ?) > 0"); binds.append(.text(t)) }
+        for t in query.nameTerms { conditions.append("instr(text, ?) > 0"); binds.append(.text(t)) }
+        for (i, t) in query.pluginTerms.enumerated() {
+            let m = pluginMatch(t, i < query.pluginTermFingerprints.count ? query.pluginTermFingerprints[i] : [])
+            conditions.append(m.sql); binds += m.binds
+        }
+        if !query.kinds.isEmpty {
+            conditions.append("kind IN (" + query.kinds.map { _ in "?" }.joined(separator: ",") + ")")
+            binds += query.kinds.map { .text($0.rawValue) }
+        }
+        switch query.hidden {
+        case .include: break
+        case .exclude: conditions.append("hidden = 0")
+        case .only: conditions.append("hidden = 1")
+        }
+        if !anchored {
+            let any = query.terms.indices.map { trackMatch($0) }
+            conditions.append("(" + any.map(\.sql).joined(separator: " OR ") + ")")
+            for m in any { binds += m.binds }
+        }
+        let sql = "SELECT id, path, position FROM tracks WHERE " + conditions.joined(separator: " AND ")
         var matches: [(id: Int64, path: String, position: Int)] = []
         try self.query(sql, binds: binds) { stmt in
             matches.append((sqlite3_column_int64(stmt, 0), text(stmt, 1), Int(sqlite3_column_int64(stmt, 2))))
@@ -199,7 +227,7 @@ public actor SummaryDatabase {
             CREATE TABLE IF NOT EXISTS entries(path TEXT PRIMARY KEY, pd_mtime INTEGER NOT NULL, pd_size INTEGER NOT NULL, entry BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS details(path TEXT PRIMARY KEY, summary BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS tracks(id INTEGER PRIMARY KEY, path TEXT NOT NULL, position INTEGER NOT NULL, kind TEXT NOT NULL, hidden INTEGER NOT NULL,
-                name TEXT NOT NULL, object_name TEXT NOT NULL, channel TEXT NOT NULL, text TEXT NOT NULL, fingerprints TEXT NOT NULL, project_text TEXT NOT NULL);
+                name TEXT NOT NULL, object_name TEXT NOT NULL, channel TEXT NOT NULL, text TEXT NOT NULL, plugin_text TEXT NOT NULL, fingerprints TEXT NOT NULL, project_text TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS tracks_path ON tracks(path);
             """)
         // Stale parser output (or schema) ⇒ drop every row; they are re-derived by the next scan.

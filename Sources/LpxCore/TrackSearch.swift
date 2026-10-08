@@ -10,8 +10,10 @@ public struct TrackSearchRow: Equatable, Sendable {
     public var name: String
     public var objectName: String
     public var channel: String
-    /// Folded text a search term is looked up in: track name, object name, channel, names of plug-ins the file itself names (Apple stock).
+    /// Folded track name, object name and channel.
     public var text: String
+    /// Folded names of the plug-ins the file itself names (Apple stock); other plug-ins are found through `fingerprints`.
+    public var pluginText: String
     /// `|fingerprint|fingerprint|` of the track's plug-ins (for names that need the AU registry).
     public var fingerprints: String
     /// Folded project name.
@@ -26,11 +28,12 @@ public struct TrackSearchRow: Equatable, Sendable {
             var seen = Set<String>()
             let unique = plugins.filter { seen.insert($0.fingerprint).inserted }
             let object = t.objectName ?? ""
-            let parts = [t.displayName, object, t.name] + unique.compactMap(\.displayName)
+            let parts = [t.displayName, object, t.name]
             return TrackSearchRow(
                 path: summary.path, position: position, kind: t.kind, isHidden: t.isHidden,
                 name: t.displayName, objectName: object, channel: t.name,
                 text: SearchMatcher.fold(parts.joined(separator: "\n")),
+                pluginText: SearchMatcher.fold(unique.compactMap(\.displayName).joined(separator: "\n")),
                 fingerprints: unique.isEmpty ? "" : "|" + unique.map(\.fingerprint).joined(separator: "|") + "|",
                 projectText: project)
         }
@@ -40,8 +43,20 @@ public struct TrackSearchRow: Equatable, Sendable {
 /// What the user typed, prepared for the database: folded terms, and for each term the fingerprints of installed
 /// plug-ins whose registry name contains it.
 public struct TrackSearchQuery: Equatable, Sendable {
+    public enum Visibility: Sendable { case include, exclude, only }
+
+    /// Free terms: each must be found in the track's name/object/channel/plug-ins, or in the project's name.
     public var terms: [String]
     public var pluginFingerprints: [[String]]
+    /// Field-specific narrowing (all combined with AND): terms that must be in the project name / in the track's own
+    /// names / among its plug-ins (with the registry fingerprints each plug-in term resolved to).
+    public var projectTerms: [String] = []
+    public var nameTerms: [String] = []
+    public var pluginTerms: [String] = []
+    public var pluginTermFingerprints: [[String]] = []
+    /// Restrict to these kinds; empty = any.
+    public var kinds: Set<TrackKind> = []
+    public var hidden: Visibility = .include
 
     public init(terms: [String], pluginFingerprints: [[String]] = []) {
         self.terms = terms
@@ -54,7 +69,7 @@ public struct TrackSearchQuery: Equatable, Sendable {
         self.init(terms: t, pluginFingerprints: t.map(fingerprints))
     }
 
-    public var isEmpty: Bool { terms.isEmpty }
+    public var isEmpty: Bool { terms.isEmpty && projectTerms.isEmpty && nameTerms.isEmpty && pluginTerms.isEmpty && kinds.isEmpty }
 }
 
 public struct TrackHit: Equatable, Sendable {

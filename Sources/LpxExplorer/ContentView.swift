@@ -104,6 +104,10 @@ struct ProjectListView: View {
         .safeAreaInset(edge: .top, spacing: 0) { FilterChips(count: paths.count) }
         .toolbar {
             ToolbarItem {
+                Toggle(isOn: $model.searchPanelOpen) { Label("Track Search", systemImage: "line.3.horizontal.decrease.circle") }
+                    .help("Search tracks across the whole library with filters")
+            }
+            ToolbarItem {
                 Toggle(isOn: $model.onlyMissingPlugins) {
                     Label("Missing plug-ins only", systemImage: "exclamationmark.triangle")
                 }
@@ -299,12 +303,24 @@ struct SearchResultsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) { SearchFilterBar() }
+        .toolbar {
+            ToolbarItem {
+                Toggle(isOn: $model.searchPanelOpen) { Label("Track Search", systemImage: "line.3.horizontal.decrease.circle") }
+                    .help("Back to the project list")
+            }
+        }
         .navigationTitle("Search")
         .navigationSubtitle("\(model.trackResults.total) track\(model.trackResults.total == 1 ? "" : "s")")
         .navigationSplitViewColumnWidth(min: 300, ideal: 750)
         .overlay {
             if nameOnly.isEmpty && model.trackResults.hits.isEmpty && !model.isScanning {
-                ContentUnavailableView.search(text: model.query)
+                if model.query.isEmpty && !model.filters.hasText && model.filters.kinds.isEmpty {
+                    ContentUnavailableView("Search tracks", systemImage: "magnifyingglass",
+                                           description: Text("Type in the search box or use the filters above. Matches come from every folder in the library."))
+                } else {
+                    ContentUnavailableView.search(text: model.query)
+                }
             }
         }
     }
@@ -350,5 +366,39 @@ struct TrackHitRow: View {
                 }
             }
         }
+    }
+}
+
+/// Field filters for drilling down: every field narrows the same result list.
+struct SearchFilterBar: View {
+    @Environment(LibraryModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                TextField("Project", text: $model.filters.project)
+                TextField("Track / object name", text: $model.filters.name)
+                TextField("Plug-in", text: $model.filters.plugin)
+            }
+            .textFieldStyle(.roundedBorder)
+            HStack(spacing: 6) {
+                ForEach(LibraryModel.SearchFilters.KindGroup.allCases) { g in
+                    let on = model.filters.kinds.contains(g)
+                    Toggle(g.rawValue, isOn: Binding(get: { on }, set: { if $0 { model.filters.kinds.insert(g) } else { model.filters.kinds.remove(g) } }))
+                        .toggleStyle(.button).controlSize(.small)
+                }
+                Picker("Hidden", selection: $model.filters.hidden) {
+                    Text("Hidden tracks: show").tag(TrackSearchQuery.Visibility.include)
+                    Text("Hidden tracks: skip").tag(TrackSearchQuery.Visibility.exclude)
+                    Text("Hidden tracks: only").tag(TrackSearchQuery.Visibility.only)
+                }
+                .labelsHidden().controlSize(.small).fixedSize()
+                Spacer()
+                if model.filters.isActive { Button("Clear") { model.clearFilters() }.controlSize(.small) }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(.bar)
     }
 }
