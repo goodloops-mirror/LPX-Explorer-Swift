@@ -28,6 +28,9 @@ struct LpxExplorerApp: App {
         }
         .defaultSize(width: 1500, height: 860)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About LPX Explorer") { AboutPanel.show() }
+            }
             CommandGroup(after: .toolbar) {
                 Button("Reset Column Widths") { model.resetColumnWidths() }
             }

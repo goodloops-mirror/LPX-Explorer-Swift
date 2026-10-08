@@ -13,6 +13,8 @@ APP="build/LPX Explorer.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/LpxExplorer "$APP/Contents/MacOS/LpxExplorer"
+# Good Loops logo for the About panel.
+cp "Graphics/good loops logo.png" "$APP/Contents/Resources/GoodLoopsLogo.png"
 # App icon: Graphics/Icons/macOS App Icon — 1024.png → AppIcon.icns (all sizes macOS expects).
 ICON_SRC="Graphics/Icons/macOS App Icon — 1024.png"
 if [ -f "$ICON_SRC" ]; then
@@ -31,6 +33,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>LPX Explorer</string>
   <key>CFBundleDisplayName</key><string>LPX Explorer</string>
   <key>CFBundleIdentifier</key><string>local.lpx-explorer</string>
+  <key>NSHumanReadableCopyright</key><string>© 2026 Good Loops · GPL-3.0-or-later. Based on LPX Explorer by Rhyd Lewis.</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleExecutable</key><string>LpxExplorer</string>
   <key>CFBundlePackageType</key><string>APPL</string>

@@ -48,7 +48,11 @@ swift build -c release --product lpx-scan && .build/release/lpx-scan <folder> [w
 
 ## Local-only
 
-The app makes **no network requests**: no updater, no analytics, no web search. `NoNetworkTests` scans `Sources/` for network/updater APIs and URLs, rejects `NSWorkspace.open` on anything but local files, and requires an empty dependency list. Don't add `URLSession`, WebKit, Sparkle, or any package. (Project files are only ever *revealed* in Finder, never opened.)
+The app makes **no network requests**: no updater, no analytics, no web search. `NoNetworkTests` scans `Sources/` for network/updater APIs and URLs, rejects `NSWorkspace.open` on anything but local files, and requires an empty dependency list. Don't add `URLSession`, WebKit, Sparkle, or any package. (Project files are only ever *revealed* in Finder, never opened.) The one exception to "no URLs in the sources" is `AboutInfo.swift`: the About box shows a few allow-listed links (Good Loops, later the GitHub mirror and Buy Me a Coffee) as clickable text that the system opens in the browser; the allow-list lives in `NoNetworkTests`.
+
+## Licence & credits
+
+GPL-3.0-or-later (`LICENSE`), because this app is a port of the GPL-3.0 original LPX Explorer by Rhyd Lewis (`legacy-tauri/`). Keep that acknowledgement (About box, README, `legacy-tauri/LICENSE`) and keep the source available with every distributed build. Published by Good Loops.
 
 ## Scan & storage architecture
 

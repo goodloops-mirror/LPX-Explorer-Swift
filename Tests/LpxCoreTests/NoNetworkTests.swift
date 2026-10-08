@@ -19,10 +19,22 @@ final class NoNetworkTests: XCTestCase {
         ]
         let files = try swiftSources()
         XCTAssertGreaterThan(files.count, 5, "found the source tree")
-        for (path, text) in files {
+        for (path, rawText) in files {
+            // The About box may carry exactly these links; they open in the user's browser, the app itself requests nothing.
+            var text = rawText
+            if path.hasSuffix("/AboutInfo.swift") { for url in Self.allowedAboutURLs { text = text.replacingOccurrences(of: url, with: "") } }
             for token in banned where text.contains(token) {
                 XCTFail("\(path) mentions \(token): the app must stay local-only")
             }
+        }
+    }
+
+    /// Every external link the app may show (About box only). Adding one is a deliberate, reviewed change.
+    private static let allowedAboutURLs = ["https://www.good-loops.com"]
+
+    func testOnlyAboutInfoMayContainLinksAndOnlyAllowedOnes() throws {
+        for (path, text) in try swiftSources() where !path.hasSuffix("/AboutInfo.swift") {
+            XCTAssertFalse(text.contains("https://"), "\(path): links belong in AboutInfo.swift")
         }
     }
 
