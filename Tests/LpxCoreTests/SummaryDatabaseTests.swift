@@ -136,6 +136,56 @@ final class SummaryDatabaseTests: XCTestCase {
         let entries = try await db.entries()
         XCTAssertEqual(entries.map(\.path), ["/m/good.logicx"])
     }
+
+    func testFailuresAreRememberedWithTheirStampAndClearedByAGoodParseOrRemoval() async throws {
+        let db = try SummaryDatabase(url: try dbURL())
+        try await db.recordFailures([ProjectFailure(path: "/m/bad.logicx", stamp: DatabaseStamp(mtime: 5, size: 6), message: "no ProjectData"),
+                                     ProjectFailure(path: "/m/bad2.logicx", stamp: DatabaseStamp(mtime: 7, size: 8), message: "broken")])
+        let failures = try await db.failures()
+        XCTAssertEqual(failures, ["/m/bad.logicx": "no ProjectData", "/m/bad2.logicx": "broken"])
+        let stamps = try await db.stamps()
+        XCTAssertEqual(stamps["/m/bad.logicx"], DatabaseStamp(mtime: 5, size: 6), "so the scanner skips it until the file changes")
+        let count = try await db.count()
+        XCTAssertEqual(count, 0, "a failure is not a project")
+
+        try await db.upsert([summary("/m/bad.logicx")])
+        try await db.remove(paths: ["/m/bad2.logicx"])
+        let after = try await db.failures()
+        XCTAssertTrue(after.isEmpty)
+    }
+
+    func testStaleTracksTableIsRebuiltFromDetailsWithoutReparsing() async throws {
+        let url = try dbURL()
+        let db = try SummaryDatabase(url: url)
+        var numbered = summary("/m/a.logicx", mtime: 3, size: 4)
+        numbered.tracks[0].position = 1
+        try await db.upsert([numbered])
+        let fresh = try await db.rebuildTracksIfNeeded()
+        XCTAssertFalse(fresh, "a table written by the current code needs no rebuild")
+        try await db.invalidateTracksForTesting()
+
+        let reopened = try SummaryDatabase(url: url)
+        let before = try await reopened.searchTracks(TrackSearchQuery(terms: ["lead"]), limit: 10)
+        XCTAssertTrue(before.hits.isEmpty)
+        let rebuilt = try await reopened.rebuildTracksIfNeeded()
+        XCTAssertTrue(rebuilt)
+        let after = try await reopened.searchTracks(TrackSearchQuery(terms: ["lead"]), limit: 10)
+        XCTAssertEqual(after.hits.map(\.name), ["Lead Vox"])
+        let stamps = try await reopened.stamps(), count = try await reopened.count()
+        XCTAssertEqual(stamps["/m/a.logicx"], DatabaseStamp(mtime: 3, size: 4), "projects are kept")
+        XCTAssertEqual(count, 1)
+        let again = try await reopened.rebuildTracksIfNeeded()
+        XCTAssertFalse(again)
+    }
+
+    func testFailureIsReplacedWhenTheSameProjectFailsAgain() async throws {
+        let db = try SummaryDatabase(url: try dbURL())
+        try await db.recordFailures([ProjectFailure(path: "/m/x.logicx", stamp: DatabaseStamp(mtime: 1, size: 1), message: "first")])
+        try await db.recordFailures([ProjectFailure(path: "/m/x.logicx", stamp: DatabaseStamp(mtime: 2, size: 2), message: "second")])
+        let failures = try await db.failures(), stamps = try await db.stamps()
+        XCTAssertEqual(failures, ["/m/x.logicx": "second"])
+        XCTAssertEqual(stamps["/m/x.logicx"], DatabaseStamp(mtime: 2, size: 2))
+    }
 }
 
 final class LegacyCacheCleanupTests: XCTestCase {

@@ -237,13 +237,16 @@ struct ScanBanner: View {
     @Environment(AuRegistry.self) private var registry
 
     var body: some View {
-        if model.isScanning || registry.isScanning || registry.lastError != nil {
+        if model.cacheUnavailable {
+            Label("Couldn't open the library database in ~/Library/Application Support/LpxExplorer — projects are re-read at every launch until that is fixed.", systemImage: "exclamationmark.triangle")
+                .font(.callout).foregroundStyle(.orange).padding(.horizontal, 12).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading).background(.bar)
+        } else if model.isScanning || registry.isScanning || registry.lastError != nil {
             HStack(spacing: 12) {
                 if model.isScanning {
                     if let message = model.scanMessage {
                         Text(message)
                     } else {
-                        Text("Reading library · \(model.scanDone) of \(model.scanTotal)")
+                        Text("Updating \(model.scanTotal) new or changed project\(model.scanTotal == 1 ? "" : "s") · \(model.scanDone) done")
                         ProgressView(value: Double(model.scanDone), total: Double(max(1, model.scanTotal))).frame(maxWidth: 240)
                     }
                     Button("Stop") { model.stopScan() }

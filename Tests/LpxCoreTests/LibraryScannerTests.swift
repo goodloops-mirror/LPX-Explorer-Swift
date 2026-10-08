@@ -120,4 +120,29 @@ final class LibraryScannerTests: XCTestCase {
         XCTAssertTrue(all.contains { if case .parsed(let s) = $0 { return s.path == fresh.path } else { return false } })
         XCTAssertTrue(all.contains { if case .failed(let p, _) = $0 { return p == broken.path } else { return false } })
     }
+
+    func testChangedBundlesAreNewOnesAndThoseWithADifferentStamp() async throws {
+        let dir = try Fixture.tempDir()
+        let same = try Fixture.logicx(in: dir, name: "same.logicx"), edited = try Fixture.logicx(in: dir, name: "edited.logicx")
+        let fresh = try Fixture.logicx(in: dir, name: "fresh.logicx"), gone = dir.appendingPathComponent("gone.logicx")
+        func stamp(_ u: URL) -> DatabaseStamp {
+            let st = ProjectParser.projectDataStat(bundle: u)!
+            return DatabaseStamp(mtime: st.mtime, size: st.size)
+        }
+        var editedStamp = stamp(edited); editedStamp.size += 1
+        let known = [same.path: stamp(same), edited.path: editedStamp]
+
+        let changed = await LibraryScanner.changedBundles([same, edited, fresh, gone], known: known, workers: 3)
+
+        XCTAssertEqual(changed.map(\.lastPathComponent), ["edited.logicx", "fresh.logicx", "gone.logicx"], "order kept; a bundle without ProjectData is left to the parser to report")
+    }
+
+    func testNothingChangedMeansNothingToParse() async throws {
+        let dir = try Fixture.tempDir()
+        let bundles = try (0..<10).map { try Fixture.logicx(in: dir, name: "p\($0).logicx") }
+        var known: [String: DatabaseStamp] = [:]
+        for b in bundles { let st = ProjectParser.projectDataStat(bundle: b)!; known[b.path] = DatabaseStamp(mtime: st.mtime, size: st.size) }
+        let changed = await LibraryScanner.changedBundles(bundles, known: known, workers: 4)
+        XCTAssertTrue(changed.isEmpty)
+    }
 }

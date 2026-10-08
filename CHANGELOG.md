@@ -6,6 +6,12 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+### Changed
+- Launch only stats the projects' ProjectData and parses what is new or modified; with nothing changed there is no progress bar and no parsing. The banner now reads "Updating N new or changed projects".
+- Projects that failed to parse are remembered (with their file stamp) and retried only when the file changes.
+- Changing the track-search table layout rebuilds it from the stored summaries instead of re-parsing the whole library.
+- The app says so when it cannot open its library database (it would otherwise re-read everything at every launch).
+
 ## [0.2.0] - 2026-10-08
 
 ### Changed

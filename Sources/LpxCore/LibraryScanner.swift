@@ -42,10 +42,34 @@ public enum LibraryScanner {
         }
     }
 
-    private static func process(_ url: URL, known: DatabaseStamp?, parse: (URL) throws -> ProjectSummary) -> ScanOutcome {
-        if let known, let stat = ProjectParser.projectDataStat(bundle: url), stat.mtime == known.mtime, stat.size == known.size {
-            return .unchanged(path: url.path)
+    /// The bundles that need parsing: new ones and those whose ProjectData stamp differs from `known`.
+    /// Only stats files (parallel, no parsing), so a launch with nothing changed costs milliseconds.
+    public static func changedBundles(_ bundles: [URL], known: [String: DatabaseStamp], workers: Int) async -> [URL] {
+        guard !bundles.isEmpty else { return [] }
+        let chunk = max(1, bundles.count / (max(1, workers) * 4))
+        let ranges = stride(from: 0, to: bundles.count, by: chunk).map { $0..<min($0 + chunk, bundles.count) }
+        let flags = await withTaskGroup(of: (Int, [Bool]).self) { group -> [Int: [Bool]] in
+            for (n, r) in ranges.enumerated() {
+                group.addTask { (n, r.map { isChanged(bundles[$0], known: known[bundles[$0].path]) }) }
+            }
+            var out: [Int: [Bool]] = [:]
+            for await (n, f) in group { out[n] = f }
+            return out
         }
+        var changed: [URL] = []
+        for (n, r) in ranges.enumerated() {
+            for (k, i) in r.enumerated() where flags[n]?[k] ?? true { changed.append(bundles[i]) }
+        }
+        return changed
+    }
+
+    private static func isChanged(_ url: URL, known: DatabaseStamp?) -> Bool {
+        guard let known, let stat = ProjectParser.projectDataStat(bundle: url) else { return true }
+        return stat.mtime != known.mtime || stat.size != known.size
+    }
+
+    private static func process(_ url: URL, known: DatabaseStamp?, parse: (URL) throws -> ProjectSummary) -> ScanOutcome {
+        if !isChanged(url, known: known) { return .unchanged(path: url.path) }
         do {
             return .parsed(try parse(url))
         } catch {

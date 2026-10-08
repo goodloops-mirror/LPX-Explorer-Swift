@@ -7,6 +7,15 @@ public struct DatabaseStamp: Equatable, Sendable {
     public init(mtime: Int64, size: UInt64) { self.mtime = mtime; self.size = size }
 }
 
+/// A project that could not be parsed, remembered with the ProjectData stamp it failed at so it is not retried
+/// at every launch — only when the file changes.
+public struct ProjectFailure: Equatable, Sendable {
+    public var path: String
+    public var stamp: DatabaseStamp
+    public var message: String
+    public init(path: String, stamp: DatabaseStamp, message: String) { self.path = path; self.stamp = stamp; self.message = message }
+}
+
 public enum DatabaseError: Error, Equatable { case sqlite(String) }
 
 /// On-disk cache of parsed projects (SQLite, in our own Application Support folder — never inside a
@@ -15,7 +24,10 @@ public enum DatabaseError: Error, Equatable { case sqlite(String) }
 public actor SummaryDatabase {
     /// Bump when parser output changes so stale rows are discarded on the next launch.
     public static let parserVersion = 6
+    /// Wipes everything (a full re-parse) when bumped: only for changes to `entries` / `details` / `failures`.
     private static let schemaVersion = 3
+    /// Layout/content of the derived `tracks` table. Bumping it rebuilds that table from `details` (no re-parse).
+    private static let tracksVersion = 1
     // SQLite must copy bound text/blobs: Swift's temporary buffers are gone after the bind call returns.
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -25,6 +37,7 @@ public actor SummaryDatabase {
     }
 
     private var db: OpaquePointer?
+    private var tracksStale = false
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -42,6 +55,49 @@ public actor SummaryDatabase {
 
     deinit { sqlite3_close(db) }
 
+    /// Re-derive the `tracks` rows from the stored full summaries when their layout version changed (cheap, background, no parsing).
+    /// Returns whether a rebuild happened.
+    @discardableResult
+    public func rebuildTracksIfNeeded() throws -> Bool {
+        if !tracksStale, try meta("tracks") == String(Self.tracksVersion) { return false }
+        var summaries: [ProjectSummary] = []
+        try query("SELECT summary FROM details") { stmt in
+            if let s = try? decoder.decode(ProjectSummary.self, from: blob(stmt, 0)) { summaries.append(s) }
+        }
+        try exec("BEGIN IMMEDIATE")
+        do {
+            try exec("DELETE FROM tracks")
+            for s in summaries { try insertTrackRows(for: s) }
+            try run("INSERT OR REPLACE INTO meta(key, value) VALUES ('tracks', ?)", [.text(String(Self.tracksVersion))])
+            try exec("COMMIT")
+        } catch {
+            try? exec("ROLLBACK")
+            throw error
+        }
+        tracksStale = false
+        return true
+    }
+
+    private func meta(_ key: String) throws -> String? {
+        var value: String?
+        try query("SELECT value FROM meta WHERE key = ?", binds: [.text(key)]) { value = text($0, 0) }
+        return value
+    }
+
+    private func insertTrackRows(for s: ProjectSummary) throws {
+        for r in TrackSearchRow.rows(for: s) {
+            try run("INSERT INTO tracks(path, position, kind, hidden, name, object_name, channel, text, plugin_text, fingerprints, project_text) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    [.text(r.path), .int(Int64(r.position)), .text(r.kind.rawValue), .int(r.isHidden ? 1 : 0), .text(r.name),
+                     .text(r.objectName), .text(r.channel), .text(r.text), .text(r.pluginText), .text(r.fingerprints), .text(r.projectText)])
+        }
+    }
+
+    /// Test hook: pretend the tracks table predates the current layout.
+    func invalidateTracksForTesting() throws {
+        try exec("DELETE FROM tracks")
+        try run("INSERT OR REPLACE INTO meta(key, value) VALUES ('tracks', '0')", [])
+    }
+
     // MARK: API
 
     public func entries() throws -> [ProjectListEntry] {
@@ -54,8 +110,10 @@ public actor SummaryDatabase {
 
     public func stamps() throws -> [String: DatabaseStamp] {
         var out: [String: DatabaseStamp] = [:]
-        try query("SELECT path, pd_mtime, pd_size FROM entries") { stmt in
-            out[text(stmt, 0)] = DatabaseStamp(mtime: sqlite3_column_int64(stmt, 1), size: UInt64(bitPattern: sqlite3_column_int64(stmt, 2)))
+        for table in ["failures", "entries"] { // entries last: a good parse wins over an old failure
+            try query("SELECT path, pd_mtime, pd_size FROM \(table)") { stmt in
+                out[text(stmt, 0)] = DatabaseStamp(mtime: sqlite3_column_int64(stmt, 1), size: UInt64(bitPattern: sqlite3_column_int64(stmt, 2)))
+            }
         }
         return out
     }
@@ -78,12 +136,9 @@ public actor SummaryDatabase {
                 try run("INSERT OR REPLACE INTO entries(path, pd_mtime, pd_size, entry) VALUES (?,?,?,?)",
                         [.text(s.path), .int(s.projectDataMTime), .int(Int64(bitPattern: s.projectDataSize)), .blob(entry)])
                 try run("INSERT OR REPLACE INTO details(path, summary) VALUES (?,?)", [.text(s.path), .blob(full)])
+                try run("DELETE FROM failures WHERE path = ?", [.text(s.path)])
                 try run("DELETE FROM tracks WHERE path = ?", [.text(s.path)])
-                for r in TrackSearchRow.rows(for: s) {
-                    try run("INSERT INTO tracks(path, position, kind, hidden, name, object_name, channel, text, plugin_text, fingerprints, project_text) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                            [.text(r.path), .int(Int64(r.position)), .text(r.kind.rawValue), .int(r.isHidden ? 1 : 0), .text(r.name),
-                             .text(r.objectName), .text(r.channel), .text(r.text), .text(r.pluginText), .text(r.fingerprints), .text(r.projectText)])
-                }
+                try insertTrackRows(for: s)
             }
             try exec("COMMIT")
         } catch {
@@ -100,6 +155,7 @@ public actor SummaryDatabase {
                 try run("DELETE FROM entries WHERE path = ?", [.text(p)])
                 try run("DELETE FROM details WHERE path = ?", [.text(p)])
                 try run("DELETE FROM tracks WHERE path = ?", [.text(p)])
+                try run("DELETE FROM failures WHERE path = ?", [.text(p)])
             }
             try exec("COMMIT")
         } catch {
@@ -189,6 +245,28 @@ public actor SummaryDatabase {
         return TrackSearchResult(hits: hits, total: matches.count)
     }
 
+    public func recordFailures(_ failures: [ProjectFailure]) throws {
+        guard !failures.isEmpty else { return }
+        try exec("BEGIN IMMEDIATE")
+        do {
+            for f in failures {
+                try run("INSERT OR REPLACE INTO failures(path, pd_mtime, pd_size, message) VALUES (?,?,?,?)",
+                        [.text(f.path), .int(f.stamp.mtime), .int(Int64(bitPattern: f.stamp.size)), .text(f.message)])
+            }
+            try exec("COMMIT")
+        } catch {
+            try? exec("ROLLBACK")
+            throw error
+        }
+    }
+
+    /// Path → message of every remembered failure.
+    public func failures() throws -> [String: String] {
+        var out: [String: String] = [:]
+        try query("SELECT path, message FROM failures") { out[text($0, 0)] = text($0, 1) }
+        return out
+    }
+
     public func count() throws -> Int {
         var n = 0
         try query("SELECT COUNT(*) FROM entries") { n = Int(sqlite3_column_int64($0, 0)) }
@@ -228,6 +306,7 @@ public actor SummaryDatabase {
             CREATE TABLE IF NOT EXISTS details(path TEXT PRIMARY KEY, summary BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS tracks(id INTEGER PRIMARY KEY, path TEXT NOT NULL, position INTEGER NOT NULL, kind TEXT NOT NULL, hidden INTEGER NOT NULL,
                 name TEXT NOT NULL, object_name TEXT NOT NULL, channel TEXT NOT NULL, text TEXT NOT NULL, plugin_text TEXT NOT NULL, fingerprints TEXT NOT NULL, project_text TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS failures(path TEXT PRIMARY KEY, pd_mtime INTEGER NOT NULL, pd_size INTEGER NOT NULL, message TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS tracks_path ON tracks(path);
             """)
         // Stale parser output (or schema) ⇒ drop every row; they are re-derived by the next scan.
@@ -239,7 +318,7 @@ public actor SummaryDatabase {
         }
         sqlite3_finalize(stmt)
         if stored != wanted {
-            try exec("DELETE FROM entries; DELETE FROM details; DELETE FROM tracks; INSERT OR REPLACE INTO meta(key, value) VALUES ('version', '\(wanted)')")
+            try exec("DELETE FROM entries; DELETE FROM details; DELETE FROM tracks; DELETE FROM failures; INSERT OR REPLACE INTO meta(key, value) VALUES ('version', '\(wanted)'); INSERT OR REPLACE INTO meta(key, value) VALUES ('tracks', '\(tracksVersion)')")
         }
         return db
     }

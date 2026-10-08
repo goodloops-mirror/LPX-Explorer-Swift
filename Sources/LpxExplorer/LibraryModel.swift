@@ -31,6 +31,8 @@ final class LibraryModel {
     private(set) var errors: [String: String] = [:]
     /// True while the cached library is being read from disk at launch.
     private(set) var isLoadingCache = false
+    /// The on-disk library couldn't be opened: this session starts from scratch and nothing is remembered.
+    private(set) var cacheUnavailable = false
     private(set) var isScanning = false { didSet { if oldValue && !isScanning { scheduleSearch() } } }
     private(set) var scanTotal = 0
     private(set) var scanDone = 0
@@ -89,9 +91,13 @@ final class LibraryModel {
         self.registry = registry
         self.folders = UserDefaults.standard.stringArray(forKey: Self.foldersKey) ?? []
         SummaryDatabase.removeLegacyJSONCache(in: SummaryDatabase.defaultURL.deletingLastPathComponent())
-        // The cache is disposable; if the real location can't be opened fall back to a throw-away file.
-        self.db = (try? SummaryDatabase(url: SummaryDatabase.defaultURL))
-            ?? (try? SummaryDatabase(url: FileManager.default.temporaryDirectory.appendingPathComponent("lpx-\(UUID().uuidString).sqlite")))
+        // The cache is disposable; if the real location can't be opened fall back to a throw-away file (and say so).
+        if let real = try? SummaryDatabase(url: SummaryDatabase.defaultURL) {
+            self.db = real
+        } else {
+            self.db = try? SummaryDatabase(url: FileManager.default.temporaryDirectory.appendingPathComponent("lpx-\(UUID().uuidString).sqlite"))
+            self.cacheUnavailable = true
+        }
         self.selectedFolder = folders.first
     }
 
@@ -105,6 +111,9 @@ final class LibraryModel {
         Task {
             let cached = (try? await db.entries()) ?? []
             for e in cached where entries[e.path] == nil { entries[e.path] = e }
+            // Projects that failed to parse stay failed until their file changes (no retry at every launch).
+            for (path, message) in (try? await db.failures()) ?? [:] where entries[path] == nil { errors[path] = message }
+            Task { _ = try? await db.rebuildTracksIfNeeded() } // derived search rows; cheap and never a re-parse
             for folder in folders where folderProjects[folder] == nil {
                 // Provisional list straight from the cache; discovery below confirms it.
                 let prefix = folder.hasSuffix("/") ? folder : folder + "/"
@@ -203,9 +212,13 @@ final class LibraryModel {
             }
             guard let self else { return }
             let known = (try? await self.db?.stamps()) ?? [:]
-            let bundles = all.flatMap(\.urls)
+            self.scanMessage = "Checking for changes…"
+            // Only new or modified projects are parsed; with nothing changed this is a quick stat pass and no progress bar.
+            let bundles = await LibraryScanner.changedBundles(all.flatMap(\.urls), known: known, workers: workers)
+            guard !flag.isSet else { self.isScanning = false; return }
             self.scanTotal = bundles.count
             self.scanMessage = nil
+            if bundles.isEmpty { self.isScanning = false; return }
 
             let collector = OutcomeCollector()
             let flusher = Task { [weak self] in
@@ -214,7 +227,7 @@ final class LibraryModel {
                     self?.apply(collector.drain())
                 }
             }
-            await LibraryScanner.scan(bundles: bundles, workers: workers, known: known, onOutcome: collector.add)
+            await LibraryScanner.scan(bundles: bundles, workers: workers, onOutcome: collector.add)
             flusher.cancel()
             self.apply(collector.drain())
             self.isScanning = false
@@ -233,6 +246,7 @@ final class LibraryModel {
     private func apply(_ outcomes: [ScanOutcome]) {
         guard !outcomes.isEmpty else { return }
         var fresh: [ProjectSummary] = []
+        var failed: [ProjectFailure] = []
         for o in outcomes {
             switch o {
             case .unchanged: break
@@ -244,10 +258,14 @@ final class LibraryModel {
                 fresh.append(s)
             case .failed(let path, let message):
                 errors[path] = message
+                if let st = ProjectParser.projectDataStat(bundle: URL(fileURLWithPath: path)) {
+                    failed.append(ProjectFailure(path: path, stamp: DatabaseStamp(mtime: st.mtime, size: st.size), message: message))
+                }
             }
         }
         scanDone = min(scanTotal, scanDone + outcomes.count)
         persist(fresh)
+        if let db, !failed.isEmpty { Task { try? await db.recordFailures(failed) } }
     }
 
     /// Incremental write: only projects that were actually (re)parsed in this batch.
