@@ -6,6 +6,8 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-08
+
 ### Added
 - A short manual (two pages, PDF) under Help ▸ LPX Explorer Manual (⌘?). It is built from `docs/manual.html` with `swift scripts/make-manual.swift` and bundled into the app by `make-app.sh`.
 - The About window links to the GitHub mirror and to Buy Me a Coffee.
