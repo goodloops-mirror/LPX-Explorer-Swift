@@ -7,20 +7,15 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 ## [Unreleased]
 
 ### Added
-- Space bar plays / pauses the player (not while typing in a text field).
+- Bounces: a bounce belongs to a project when its file name starts with the project's name (version number included); whatever follows is ignored. A file with `STM#nn` after the name is stem nn (the text after it is the stem's label); every other match is a mix, the newest being the main one. They are looked up in `Bounces` folders in the project's folder and in every folder above it up to the library folder (so projects in `Backups` find the `Bounces` next to `Backups`), including all subfolders, and inside the package. The project detail shows the mix prominently with its stems below, the project list marks projects that have a bounce, and a "Bounce: any / Has bounce / No bounce" filter sits next to the search fields. Lookups are cached and re-checked in the background after every scan.
+- A player at the bottom of the window: play / pause, the waveform with a playhead (click or drag to jump), times, and "back to the project" the playback was started from. It keeps playing while you browse. The space bar plays / pauses (not while typing in a text field).
 - The project detail is split into two panes: details with the bounces right below them, and the tracks in a pane of their own. The tracks pane has a toolbar toggle; hiding it is remembered. The list column is narrower by default (450 pt) to make room.
+- Inspector metadata now matches what the original app showed: frame rate, created and modified dates (with "3 days ago"), impulse responses, sample rate in kHz, "Bundle size", and a "Snapshot from last save" caption under the window image. The project list also shows each project's folder.
 
 ### Fixed
-- The search fields above the project list keep their focus when the first letter switches the list to the results (the field bar is no longer rebuilt with the swapped view).
+- The search fields above the project list keep their focus when the first letter switches the list to the results.
 - The player is a strip of its own at the bottom of the window instead of an overlay on the content.
 - File names are never cut short any more: the player, the bounce and audio lists and the project list show them in full (wrapping when needed); stems show their label and the complete file name.
-
-### Added
-- Bounces: a bounce belongs to a project when its file name starts with the project's name (version number included); whatever follows is ignored. A file with `STM#nn` after the name is stem nn (the text after it is the stem's label); every other match is a mix, the newest being the main one. They are looked up in `Bounces` folders in the project's folder and in every folder above it up to the library folder (so projects in `Backups` find the `Bounces` next to `Backups`), including all subfolders, and inside the package. The project detail shows the mix prominently with its stems below, the project list marks projects that have a bounce, and a "Bounce: any / Has bounce / No bounce" filter sits next to the search fields. Lookups are cached and re-checked in the background after every scan.
-- A player at the bottom of the window: play / pause, the waveform with a playhead (click or drag to jump), times, and "back to the project" the playback was started from. It keeps playing while you browse.
-
-### Added
-- Inspector metadata now matches what the original app showed: frame rate, created and modified dates (with "3 days ago"), impulse responses, sample rate in kHz, "Bundle size", and a "Snapshot from last save" caption under the window image. The project list also shows each project's folder.
 
 ## [0.5.0] - 2026-10-08
 

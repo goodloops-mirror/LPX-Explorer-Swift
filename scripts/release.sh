@@ -3,8 +3,8 @@
 #
 #   scripts/release.sh <major|minor|patch|X.Y.Z> [--dry-run] [--skip-tests] [--no-package]
 #
-# The new CHANGELOG section = the hand-written notes under "## [Unreleased]"
-# + commit subjects since the previous release, grouped (feat: → Added, fix: → Fixed, everything else → Changed).
+# The new CHANGELOG section = the hand-written notes under "## [Unreleased]"; when there are none,
+# the commit subjects since the previous release, grouped (feat: → Added, fix: → Fixed, everything else → Changed).
 # Conventional prefixes (feat:, fix:, perf:, refactor:, test:) are optional; docs: and chore: commits are left out of the notes.
 # After tagging it builds the app and zips it to dist/ (scripts/package.sh); --no-package skips that.
 # --dry-run prints the section and changes nothing.
@@ -42,7 +42,7 @@ manual="$(awk '/^## \[Unreleased\]/{f=1; next} /^## \[/{f=0} f' CHANGELOG.md | s
 
 # Commit subjects since the previous release (none for the very first release of the series).
 added=""; fixed=""; changed=""
-if [ -n "$prev_tag" ]; then
+if [ -n "$prev_tag" ] && [ -z "$manual" ]; then   # hand-written notes win; commit subjects are the fallback
   while IFS= read -r subject; do
     [ -z "$subject" ] && continue
     case "$subject" in "Release v"*) continue ;; esac
