@@ -6,7 +6,19 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-08
+
 - The app is now GPL-3.0-or-later (`LICENSE`), with a licence/credits section in the README, the About window's acknowledgement of the original author (Rhyd Lewis), and "coming soon" placeholders for the source repository and Buy Me a Coffee links (set them in `AboutInfo`).
+
+### Added
+- replace the standard About panel with a resizable About window
+- About box with Good Loops branding, credits and licence
+
+### Fixed
+- no focus ring around the Good Loops logo in the About window
+
+### Changed
+- Keep docs/chore commits out of release notes; fix 0.4.0 changelog
 
 ## [0.4.0] - 2026-10-08
 
