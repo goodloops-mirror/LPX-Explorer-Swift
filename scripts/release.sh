@@ -5,7 +5,7 @@
 #
 # The new CHANGELOG section = the hand-written notes under "## [Unreleased]"
 # + commit subjects since the previous release, grouped (feat: → Added, fix: → Fixed, everything else → Changed).
-# Conventional prefixes (feat:, fix:, docs:, perf:, refactor:, test:, chore:) are optional.
+# Conventional prefixes (feat:, fix:, perf:, refactor:, test:) are optional; docs: and chore: commits are left out of the notes.
 # After tagging it builds the app and zips it to dist/ (scripts/package.sh); --no-package skips that.
 # --dry-run prints the section and changes nothing.
 # Env: RELEASE_TRAILER="Co-Authored-By: …" is appended to the release commit message.
@@ -49,7 +49,8 @@ if [ -n "$prev_tag" ]; then
     case "$subject" in
       feat:*|feat\(*) added="$added- ${subject#*: }"$'\n' ;;
       fix:*|fix\(*)   fixed="$fixed- ${subject#*: }"$'\n' ;;
-      docs:*|chore:*|test:*|refactor:*|perf:*) changed="$changed- ${subject#*: }"$'\n' ;;
+      docs:*|chore:*) ;;   # housekeeping stays out of the notes
+      test:*|refactor:*|perf:*) changed="$changed- ${subject#*: }"$'\n' ;;
       *) changed="$changed- $subject"$'\n' ;;
     esac
   done < <(git log --no-merges --format=%s "$prev_tag..HEAD")
