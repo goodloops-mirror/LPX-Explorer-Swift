@@ -68,6 +68,8 @@ LPX Explorer is its own app now; the Tauri code in `legacy-tauri/` is only a for
 - [x] **Library-wide track search**: one row per arrangement track in SQLite (`tracks`), results grouped by project with hidden tracks marked, click opens the project at the track; drill-down filters (project, track/object name, plug-in, kind, hidden); default columns 15 / 50 / 35 % with *Reset Column Widths*
 - [x] **Release process**: git tags `vX.Y.Z`, `CHANGELOG.md`, `scripts/release.sh`; the app bundle takes its version from the latest tag
 
+- [x] **Older Logic files** (Logic Pro X 10.5.1 and earlier): `karT` track records are 92 bytes (record version 4) instead of 93 (version 5) — same field offsets, one byte less of tail — and object records are not preceded by four zero bytes (the first two belong to the previous text). `ArrangementList` accepts both record sizes; `TrackObjects.complete` adds lenient matches only for object keys the strict pass missed. Verified against the same project re-saved with Logic Pro 11.2.2 (`GoldenLegacyFormatTests`). Other Logic versions in between are untested.
+
 ## Open
 - [ ] Track hierarchy: `parentOffset`/`subNumber` are never set; folders/stacks render flat
 - [ ] Golden tests take ~25 s (debug build); `swift test --filter` for quick runs

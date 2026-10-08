@@ -25,7 +25,11 @@ public enum TrackPipeline {
         let strips = channelStrips(in: raw, aus: aus)
         let records = ArrangementList.records(in: raw)
         guard !records.isEmpty else { return relevant(strips) }
-        return ArrangementTracks.build(records: records, texts: NameTexts.find(in: raw), objects: TrackObjects.find(in: raw), strips: strips)
+        // Objects the strict scan can't see (older files pack the record behind the previous text) are looked up leniently,
+        // but only the ones the track list asks for; files whose objects are all found strictly are untouched.
+        let needed = Set(records.map(\.objectKey)).subtracting([0, ArrangementTracks.folderKey])
+        let objects = TrackObjects.complete(TrackObjects.find(in: raw), needing: needed, in: raw)
+        return ArrangementTracks.build(records: records, texts: NameTexts.find(in: raw), objects: objects, strips: strips)
     }
 
     public static func tracks(_ raw: [UInt8], aus: [AURef]) -> [Track] {

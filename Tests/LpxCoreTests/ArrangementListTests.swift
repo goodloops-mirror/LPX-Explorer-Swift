@@ -4,11 +4,12 @@ import XCTest
 enum ArrangementFixture {
     static func u32(_ v: UInt32) -> [UInt8] { (0..<4).map { UInt8((v >> (8 * UInt32($0))) & 0xff) } }
 
-    /// A 93-byte track record. `type` 1 = ordinary track, 3 = the output ("Stereo Out") record.
-    static func record(index: UInt32, nameID: UInt32 = 0, key: UInt32, type: UInt8 = 1, hidden: Bool = false) -> [UInt8] {
-        var r = [UInt8](repeating: 0, count: 93)
+    /// A 93-byte track record (92 bytes and record version 4 when `older`, as written by Logic Pro X 10.5 and earlier).
+    /// `type` 1 = ordinary track, 3 = the output ("Stereo Out") record.
+    static func record(index: UInt32, nameID: UInt32 = 0, key: UInt32, type: UInt8 = 1, hidden: Bool = false, older: Bool = false) -> [UInt8] {
+        var r = [UInt8](repeating: 0, count: older ? 92 : 93)
         r.replaceSubrange(4..<8, with: Array("karT".utf8))
-        r.replaceSubrange(8..<18, with: [0x05, 0, 0x17, 0, 0, 0, 0x04, 0, 0, 0])
+        r.replaceSubrange(8..<18, with: [older ? 0x04 : 0x05, 0, 0x17, 0, 0, 0, 0x04, 0, 0, 0])
         r.replaceSubrange(18..<22, with: [0xff, 0xff, 0xff, 0xff])
         r.replaceSubrange(22..<26, with: u32(index))
         r.replaceSubrange(26..<40, with: [2, 0, 0, 0, 2, 0, 0x39, 0, 0, 0, 0, 0, 0, 0])
@@ -47,6 +48,31 @@ final class ArrangementListTests: XCTestCase {
         XCTAssertEqual(r.map(\.objectKey), [0x170, 0x10, 0x9c])
         XCTAssertEqual(r.map(\.nameTextID), [0, 0x3c, 0x50])
         XCTAssertEqual(r.map(\.isHidden), [false, true, false])
+    }
+
+    func testOlderFilesWithNinetyTwoByteRecordsReadTheSame() {
+        func list(older: Bool) -> [ArrangementRecord] {
+            ArrangementList.records(noise
+                + ArrangementFixture.record(index: 0, key: 0x170, older: older)
+                + ArrangementFixture.record(index: 1, nameID: 0x3c, key: 0x10, hidden: true, older: older)
+                + ArrangementFixture.record(index: 2, nameID: 0x50, key: 0x9c, older: older)
+                + ArrangementFixture.record(index: 3, nameID: 0x30, key: 0x50, type: 3, older: older)
+                + noise)
+        }
+        let older = list(older: true), newer = list(older: false)
+        XCTAssertEqual(newer.map(\.position), [1, 2, 3])
+        XCTAssertEqual(older.map(\.position), newer.map(\.position))
+        XCTAssertEqual(older.map(\.nameTextID), newer.map(\.nameTextID))
+        XCTAssertEqual(older.map(\.objectKey), newer.map(\.objectKey))
+        XCTAssertEqual(older.map(\.isHidden), newer.map(\.isHidden))
+    }
+
+    func testTheLongerRunWinsWhenBothSpacingsOccur() {
+        // A short run of the other spacing elsewhere in the file must not hide the real list.
+        let real = (0..<6).flatMap { ArrangementFixture.record(index: UInt32($0), key: UInt32(0x100 + $0), older: true) }
+        let stray = (0..<2).flatMap { ArrangementFixture.record(index: UInt32($0), key: 9) }
+        XCTAssertEqual(ArrangementList.records(noise + stray + noise + real + noise).count, 6)
+        XCTAssertEqual(ArrangementList.records(noise + real + noise + stray + noise).count, 6)
     }
 
     func testOutputRecordAndSentinelAreNotTracks() {
@@ -115,10 +141,10 @@ final class TrackObjectsTests: XCTestCase {
     private typealias F = ArrangementFixture
 
     /// 170 header bytes (key at 0 and 42) + registry-shaped record of class `cls`.
-    private func object(name: String, cls: UInt16, key: UInt32, stripID: UInt8) -> [UInt8] {
+    private func object(name: String, cls: UInt16, key: UInt32, stripID: UInt8, leading: [UInt8] = [0, 0]) -> [UInt8] {
         var head = [UInt8](repeating: 0x11, count: 170)
         head.replaceSubrange(0..<4, with: F.u32(key)); head.replaceSubrange(42..<46, with: F.u32(key))
-        let rec: [UInt8] = [0, 0, 0, 0, UInt8(cls & 0xff), UInt8(cls >> 8), 0, 0, 0, 0, 0xAB, 0xCD, 0, 0, UInt8(name.utf8.count), 0]
+        let rec: [UInt8] = leading + [0, 0, UInt8(cls & 0xff), UInt8(cls >> 8), 0, 0, 0, 0, 0xAB, 0xCD, 0, 0, UInt8(name.utf8.count), 0]
         return head + rec + Array(name.utf8) + [stripID, 0, 0, 0, 0, 1, 0, 0]
     }
 
@@ -152,5 +178,42 @@ final class TrackObjectsTests: XCTestCase {
         raw.replaceSubrange(42..<46, with: F.u32(0x999))
         XCTAssertTrue(TrackObjects.find(raw).isEmpty)
         XCTAssertTrue(TrackObjects.find(object(name: "Zero", cls: 0x1223, key: 0, stripID: 1)).isEmpty)
+    }
+
+    // MARK: older files: the record starts right behind the previous text
+
+    func testLenientModeAcceptsRecordsPackedBehindText() {
+        let raw = object(name: "soft piano", cls: 0x1199, key: 0x94, stripID: 3, leading: Array("of".utf8))
+        XCTAssertTrue(TrackObjects.find(raw).isEmpty, "strict: the record must start with four zero bytes")
+        XCTAssertEqual(TrackObjects.find(raw, lenient: true).map(\.name), ["soft piano"])
+        XCTAssertEqual(TrackObjects.find(raw, lenient: true).first?.key, 0x94)
+    }
+
+    func testLenientModeStillNeedsTheKeyAndTheRestOfTheShape() {
+        var noKey = object(name: "x", cls: 0x1199, key: 0x94, stripID: 3, leading: Array("of".utf8))
+        noKey.replaceSubrange(42..<46, with: F.u32(0x1))
+        XCTAssertTrue(TrackObjects.find(noKey, lenient: true).isEmpty)
+        var badShape = object(name: "x", cls: 0x1199, key: 0x94, stripID: 3, leading: [1, 1])
+        badShape.replaceSubrange(172..<174, with: [9, 9])          // bytes 2-3 of the record are not zero
+        XCTAssertTrue(TrackObjects.find(badShape, lenient: true).isEmpty)
+    }
+
+    func testCompleteAddsLenientMatchesOnlyForKeysTheStrictPassMissed() {
+        let raw = (object(name: "DX", cls: 0x1223, key: 0x170, stripID: 1)
+                   + object(name: "soft piano", cls: 0x1199, key: 0x94, stripID: 3, leading: Array("of".utf8))).withUnsafeBufferPointer { buf -> [ObjectRecord] in
+            let strict = TrackObjects.find(in: buf)
+            XCTAssertEqual(strict.map(\.name), ["DX"])
+            return TrackObjects.complete(strict, needing: [0x170, 0x94], in: buf)
+        }
+        XCTAssertEqual(raw.map(\.name), ["DX", "soft piano"])
+    }
+
+    func testCompleteLeavesFilesAloneWhenEverythingWasFoundStrictly() {
+        let data = object(name: "DX", cls: 0x1223, key: 0x170, stripID: 1) + object(name: "late", cls: 0x1199, key: 0x94, stripID: 3, leading: Array("of".utf8))
+        data.withUnsafeBufferPointer { buf in
+            let strict = TrackObjects.find(in: buf)
+            XCTAssertEqual(TrackObjects.complete(strict, needing: [0x170], in: buf), strict, "0x94 is not needed, so the lenient pass is not even run")
+            XCTAssertEqual(TrackObjects.complete(strict, needing: [], in: buf), strict)
+        }
     }
 }

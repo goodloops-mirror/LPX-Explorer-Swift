@@ -1,7 +1,8 @@
 import Foundation
 
-/// One entry of Logic's arrangement track list: a 93-byte `karT` record (object id 4). Records are stored back to
-/// back in track order, hidden tracks included.
+/// One entry of Logic's arrangement track list: a `karT` record (object id 4) of 93 bytes (92 in files written by Logic
+/// Pro X 10.5 and earlier — the same fields, one byte less of tail). Records are stored back to back in track order,
+/// hidden tracks included.
 public struct ArrangementRecord: Equatable, Sendable {
     /// 1-based track number as Logic shows it.
     public var position: Int
@@ -15,14 +16,15 @@ public struct ArrangementRecord: Equatable, Sendable {
 }
 
 public enum ArrangementList {
-    private static let stride = 93
+    /// Record sizes seen so far: Logic Pro 11 writes 93 bytes (record version 5), Logic Pro X 10.5 wrote 92 (version 4).
+    private static let strides = [93, 92]
     private static let outputType: UInt8 = 3          // the "Stereo Out" record that ends the list
     private static let hiddenBit: UInt8 = 0x04
 
     /// The track records of the project, in track order. Empty when the file has no recognisable list.
     ///
-    /// The list is the longest run of `karT` (id 4) records spaced exactly 93 bytes apart whose index counter
-    /// (u32 at +22) starts at 0 and increases by one per record. The output record (type byte 3) and the
+    /// The list is the longest run of `karT` (id 4) records spaced exactly one record size apart (see `strides`) whose
+    /// index counter (u32 at +22) starts at 0 and increases by one per record. The output record (type byte 3) and the
     /// trailing sentinel (index 0x7fffffff, which breaks the counter) are not tracks.
     public static func records(in raw: UnsafeBufferPointer<UInt8>) -> [ArrangementRecord] {
         let n = raw.count
@@ -30,21 +32,23 @@ public enum ArrangementList {
         var from = 4
         while let k = ByteSearch.indexOf(UInt8(ascii: "k"), in: raw, from: from) {
             from = k + 1
-            guard k >= 4, k + stride - 4 <= n, isHeader(raw, tag: k) else { continue }
+            guard k >= 4, k + (strides.min() ?? 93) - 4 <= n, isHeader(raw, tag: k) else { continue }
             tags.append(k)
         }
         var best: [Int] = []
-        var i = 0
-        while i < tags.count {
-            // start of a candidate run: index counter 0
-            guard u32(raw, tags[i] - 4 + 22) == 0 else { i += 1; continue }
-            var run = [tags[i]]
-            var j = i + 1
-            while j < tags.count, tags[j] - tags[j - 1] == stride, u32(raw, tags[j] - 4 + 22) == UInt32(run.count) {
-                run.append(tags[j]); j += 1
+        for stride in strides {
+            var i = 0
+            while i < tags.count {
+                // start of a candidate run: index counter 0
+                guard u32(raw, tags[i] - 4 + 22) == 0, tags[i] - 4 + stride <= n else { i += 1; continue }
+                var run = [tags[i]]
+                var j = i + 1
+                while j < tags.count, tags[j] - tags[j - 1] == stride, u32(raw, tags[j] - 4 + 22) == UInt32(run.count) {
+                    run.append(tags[j]); j += 1
+                }
+                if run.count > best.count { best = run }
+                i = max(j, i + 1)
             }
-            if run.count > best.count { best = run }
-            i = max(j, i + 1)
         }
         return best.compactMap { t -> ArrangementRecord? in
             let r = t - 4
@@ -118,7 +122,10 @@ public struct ObjectRecord: Equatable, Sendable {
 public enum TrackObjects {
     /// Object records that carry a valid key (the same non-zero u32 stored 170 and 128 bytes before the record).
     /// Layout: `4 zeros · class u16 · bytes 6-9 (x000) · 2 control bytes · 2 zeros · length · printable name · trailer`.
-    public static func find(in raw: UnsafeBufferPointer<UInt8>) -> [ObjectRecord] {
+    ///
+    /// `lenient` accepts records whose first two bytes are not zero (files written by Logic Pro X 10.5 and earlier pack the
+    /// record right behind the previous text); it is only meant as a fallback, see `complete`.
+    public static func find(in raw: UnsafeBufferPointer<UInt8>, lenient: Bool = false) -> [ObjectRecord] {
         var out: [ObjectRecord] = []
         let n = raw.count
         guard n >= 186 else { return out }
@@ -137,7 +144,7 @@ public enum TrackObjects {
             let i = next - 5
             scanFrom = next + 1
             guard i + 16 <= n else { break }
-            guard raw[i] | raw[i + 1] | raw[i + 2] | raw[i + 3] == 0,
+            guard (lenient ? raw[i + 2] | raw[i + 3] : raw[i] | raw[i + 1] | raw[i + 2] | raw[i + 3]) == 0,
                   raw[i + 7] == 0, raw[i + 8] == 0, raw[i + 9] == 0, raw[i + 12] | raw[i + 13] == 0, raw[i + 15] == 0 else { continue }
             let length = Int(raw[i + 14])
             guard length > 0, length <= 200, i + 16 + length <= n else { continue }
@@ -156,7 +163,16 @@ public enum TrackObjects {
         return out
     }
 
-    public static func find(_ raw: [UInt8]) -> [ObjectRecord] { raw.withUnsafeBufferPointer { find(in: $0) } }
+    public static func find(_ raw: [UInt8], lenient: Bool = false) -> [ObjectRecord] { raw.withUnsafeBufferPointer { find(in: $0, lenient: lenient) } }
+
+    /// `strict` plus — only for object keys in `needed` that strict found nowhere — the lenient matches. Files whose objects
+    /// are all found strictly never run the lenient pass, and a lenient match can never shadow a strict one.
+    public static func complete(_ strict: [ObjectRecord], needing needed: Set<UInt32>, in raw: UnsafeBufferPointer<UInt8>) -> [ObjectRecord] {
+        let have = Set(strict.map(\.key))
+        guard !needed.subtracting(have).isEmpty else { return strict }
+        let missing = needed.subtracting(have)
+        return strict + find(in: raw, lenient: true).filter { missing.contains($0.key) }
+    }
 
     /// The strip number sits at offset 0 or 1 of the trailer (the alignment varies), as a u16 below 512. Both readings are
     /// returned when both look plausible; the first is what the registry parser would pick.

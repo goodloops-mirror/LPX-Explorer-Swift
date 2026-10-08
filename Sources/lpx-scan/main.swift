@@ -79,6 +79,19 @@ if let dbPath = args.firstIndex(of: "--db").flatMap({ $0 + 1 < args.count ? args
     print(String(format: "db scan: %d bundles, %d re-parsed, %d unchanged, %d failed; db now holds %d; %.0f ms", bundles.count, c.parsed.count, c.unchanged, c.failed, total, Date().timeIntervalSince(t) * 1000))
     exit(0)
 }
+if args.contains("--dump-all-tracks") {
+    // Every track of every project under the folder, one line each (read-only): used to prove a parser change alters nothing else.
+    let bundles = try LogicxDiscovery.discover(in: URL(fileURLWithPath: args[1])).sorted { $0.path < $1.path }
+    for b in bundles {
+        guard let s = try? ProjectParser.parse(bundle: b) else { print("\(b.lastPathComponent)\tUNREADABLE"); continue }
+        print("\(b.lastPathComponent)\t\(s.tracks.count) tracks")
+        for t in s.tracks.sorted(by: { ($0.position ?? Int.max, $0.offset) < ($1.position ?? Int.max, $1.offset) }) {
+            let fx = (([t.instrument].compactMap { $0 }) + t.midiFx + t.audioFx).map(\.fingerprint).joined(separator: ",")
+            print("\(b.lastPathComponent)\t\(t.position.map(String.init) ?? "-")\t\(t.isHidden ? "h" : "-")\t\(t.kind)\t\(t.name)\t\(t.displayName)\t\(t.objectName ?? "")\t\(fx)")
+        }
+    }
+    exit(0)
+}
 if let idx = args.firstIndex(of: "--tracks"), idx + 1 < args.count {
     // Print the track list of one bundle in Logic's order (read-only): `lpx-scan <folder> --tracks <bundle-name-substring>`
     let bundles = try LogicxDiscovery.discover(in: URL(fileURLWithPath: args[1]))

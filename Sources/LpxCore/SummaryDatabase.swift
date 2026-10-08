@@ -23,7 +23,7 @@ public enum DatabaseError: Error, Equatable { case sqlite(String) }
 /// search and filters, and the full `ProjectSummary` loaded on demand when a project is selected.
 public actor SummaryDatabase {
     /// Bump when parser output changes so stale rows are discarded on the next launch.
-    public static let parserVersion = 6
+    public static let parserVersion = 7
     /// Wipes everything (a full re-parse) when bumped: only for changes to `entries` / `details` / `failures`.
     private static let schemaVersion = 3
     /// Layout/content of the derived `tracks` table. Bumping it rebuilds that table from `details` (no re-parse).

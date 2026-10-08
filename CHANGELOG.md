@@ -6,6 +6,9 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+### Fixed
+- Projects saved by Logic Pro X 10.5 and earlier now list all their tracks (positions, hidden tracks, names, channels). Their track records are 92 bytes instead of 93 and their object records sit directly behind the previous text; both are read now, the second one only as a fallback for objects the normal scan can't find, so files that already worked are read exactly as before (checked on all example projects). The library is re-read once because of this.
+
 ## [0.6.0] - 2026-10-08
 
 ### Added
