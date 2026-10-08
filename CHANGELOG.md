@@ -6,6 +6,12 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-08
+
+### Changed
+- changelog tidy before 0.4.0
+- Add the app icon
+
 ## [0.3.0] - 2026-10-08
 
 ### Changed
