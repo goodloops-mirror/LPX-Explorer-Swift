@@ -6,6 +6,8 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-09
+
 ### Changed
 - Releases are distributed as a disk image (`LPX-Explorer-<version>.dmg`: the app and an Applications shortcut to drag it onto) instead of a zip. `package.sh` signs and notarizes the app, builds the image with `make-dmg.sh`, then signs, notarizes and staples the image too.
 
