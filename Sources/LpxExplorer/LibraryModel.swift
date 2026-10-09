@@ -54,6 +54,28 @@ final class LibraryModel {
     /// Library-wide track search (while `query` is non-empty): matching tracks, and projects matched by name alone.
     /// Projects that match, each with the tracks/objects inside it that matched.
     private(set) var results: [ProjectResult] = []
+    /// The results in natural name order, before `sortOrder` is applied.
+    @ObservationIgnored private var nameSortedResults: [ProjectResult] = []
+    /// How the project list and the search results are ordered (remembered between launches).
+    var sortOrder: ProjectOrder = LibraryModel.savedSortOrder() {
+        didSet {
+            guard oldValue != sortOrder else { return }
+            UserDefaults.standard.set(sortOrder.field.rawValue, forKey: Self.sortFieldKey)
+            UserDefaults.standard.set(sortOrder.ascending, forKey: Self.sortAscendingKey)
+            applyResultOrder()
+        }
+    }
+    private static let sortFieldKey = "projectSortField", sortAscendingKey = "projectSortAscending"
+
+    private static func savedSortOrder() -> ProjectOrder {
+        let d = UserDefaults.standard
+        guard let raw = d.string(forKey: sortFieldKey), let field = ProjectSortField(rawValue: raw) else { return ProjectOrder() }
+        return ProjectOrder(field: field, ascending: d.object(forKey: sortAscendingKey) as? Bool ?? ProjectOrder.initial(for: field).ascending)
+    }
+
+    private func applyResultOrder() {
+        results = ProjectSorting.sorted(nameSortedResults, by: sortOrder, path: \.path, date: { self.entries[$0]?.projectDataMTime })
+    }
     /// Bounces found next to / inside each project (cached in SQLite; refreshed in the background).
     private(set) var bounces: [String: [BounceFile]] = [:]
     var bounceFilter: BounceFilter = .any { didSet { if oldValue != bounceFilter { scheduleSearch() } } }
@@ -383,7 +405,7 @@ final class LibraryModel {
         let text = query, f = filters
         let freeTerms = SearchMatcher.terms(of: text)
         guard !freeTerms.isEmpty || f.hasText || !f.kinds.isEmpty else {
-            results = []; totalMatchingTracks = 0; listedTracks = 0; return
+            nameSortedResults = []; results = []; totalMatchingTracks = 0; listedTracks = 0; return
         }
         searchTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
@@ -405,8 +427,9 @@ final class LibraryModel {
             let wholeProjects = pq.restrictsTracks ? [] : self.entries.filter { path, entry in
                 ProjectSearch.matches(pq, entry: entry, projectName: self.foldedProjectName(path), pluginText: self.pluginText(path, entry))
             }.map(\.key)
-            self.results = SearchResults.combine(hits: result.hits, projects: wholeProjects, name: Self.projectName)
+            self.nameSortedResults = SearchResults.combine(hits: result.hits, projects: wholeProjects, name: Self.projectName)
                 .filter { self.bounceFilter.allows(hasBounce: self.hasBounce($0.path)) }
+            self.applyResultOrder()
             self.totalMatchingTracks = result.total
             self.listedTracks = result.hits.count
             self.trackIndexedProjects = (try? await self.db?.trackIndexedProjectCount()) ?? nil
@@ -437,22 +460,27 @@ final class LibraryModel {
         selectedProject = nil
     }
 
-    /// The folder's projects in natural name order, narrowed by the active filters and search text.
+    /// `paths` (in natural name order) in the chosen sort order.
+    private func ordered(_ paths: [String]) -> [String] {
+        ProjectSorting.sorted(paths, by: sortOrder, date: { entries[$0]?.projectDataMTime })
+    }
+
+    /// The folder's projects, narrowed by the active filters and search text, in the chosen sort order (natural name order by default).
     func visibleProjects(in folder: String) -> [String] {
         var paths = sortedByFolder[folder] ?? []
         let filter = LibraryFilter(similarity: similarityFilter, onlyMissingPlugins: onlyMissingPlugins, bounce: bounceFilter)
         if filter.isActive { paths = filter.apply(to: paths, entries: entries, installed: registry.installed, withBounce: bouncePaths) }
         let terms = SearchMatcher.terms(of: query)
-        guard !terms.isEmpty else { return paths }
+        guard !terms.isEmpty else { return ordered(paths) }
         if haystackRegistryVersion != registry.version {
             haystacks.removeAll(keepingCapacity: true)
             foldedPluginNames.removeAll(keepingCapacity: true)
             haystackRegistryVersion = registry.version
         }
-        return paths.filter { path in
+        return ordered(paths.filter { path in
             guard let entry = entries[path] else { return SearchMatcher.matches(haystack: SearchMatcher.fold(Self.projectName(path)), terms: terms) }
             return SearchMatcher.matches(haystack: haystack(for: path, entry), terms: terms)
-        }
+        })
     }
 
     /// Folded plug-in names / project names for the project-level search, cached until the plug-in registry changes.

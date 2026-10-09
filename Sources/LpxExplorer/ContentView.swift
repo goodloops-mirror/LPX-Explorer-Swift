@@ -174,7 +174,7 @@ struct ProjectRow: View {
     var body: some View {
         let entry = model.entries[path]
         VStack(alignment: .leading, spacing: 2) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Text(LibraryModel.projectName(path)).fixedSize(horizontal: false, vertical: true)
                 if let v = model.verdict(for: path), !v.missing.isEmpty {
                     Image(systemName: v.status == .willNotOpen ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
@@ -187,6 +187,12 @@ struct ProjectRow: View {
                 if let n = entry?.alternativeCount, n > 1 {
                     Text("\(n) alts").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
                         .background(.quaternary, in: Capsule()).help("\(n) alternatives")
+                }
+                Spacer(minLength: 8)
+                // The date the list can be sorted by: when Logic last saved the project (the file's own date for old .lso files).
+                if let e = entry, e.projectDataMTime > 0 {
+                    Text(Date(timeIntervalSince1970: TimeInterval(e.projectDataMTime)).formatted(date: .abbreviated, time: .omitted))
+                        .font(.caption).monospacedDigit().foregroundStyle(.secondary).help("Date saved")
                 }
             }
             if let e = entry, e.isLegacy {
@@ -280,6 +286,10 @@ struct ScanBanner: View {
 struct MiddlePane: View {
     @Environment(LibraryModel.self) private var model
 
+    private func orderLabels(_ field: ProjectSortField) -> (first: String, second: String) {
+        field == .name ? ("A to Z", "Z to A") : ("Oldest first", "Newest first")
+    }
+
     var body: some View {
         // The bar is a sibling of the list, not an inset attached to it: typing the first letter swaps the project list for the
         // results view, and a bar attached to the swapped view was rebuilt with it, which dropped the text field's focus.
@@ -287,6 +297,23 @@ struct MiddlePane: View {
             SearchFilterBar()
             Group {
                 if model.isSearching { SearchResultsView() } else { ProjectListView() }
+            }
+        }
+        .toolbar {
+            ToolbarItem {
+                Menu {
+                    Picker("Sort by", selection: Binding(get: { model.sortOrder.field }, set: { model.sortOrder = .initial(for: $0) })) {
+                        ForEach(ProjectSortField.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                    Divider()
+                    Picker("Order", selection: Binding(get: { model.sortOrder.ascending }, set: { model.sortOrder.ascending = $0 })) {
+                        Text(orderLabels(model.sortOrder.field).first).tag(true)
+                        Text(orderLabels(model.sortOrder.field).second).tag(false)
+                    }
+                    .pickerStyle(.inline)
+                } label: { Label("Sort", systemImage: "arrow.up.arrow.down") }
+                .help("Sort the projects (now: \(model.sortOrder.field.rawValue), \(model.sortOrder.ascending ? orderLabels(model.sortOrder.field).first : orderLabels(model.sortOrder.field).second))")
             }
         }
     }

@@ -6,6 +6,9 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+### Added
+- Sort the project list and the search results by name (A–Z / Z–A) or by date saved (newest / oldest first) from a toolbar button; the date is shown at the right of every project row, and the choice is remembered. Projects without a date always come last.
+
 ## [0.9.0] - 2026-10-09
 
 ### Changed
