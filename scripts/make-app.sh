@@ -5,6 +5,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # LPX_APP_SRC: build another checkout (package.sh uses it for old release tags) with these scripts.
 cd "${LPX_APP_SRC:-$HERE/..}"
 export LPX_VERSION_REPO="$PWD"
+BUNDLE_ID="${LPX_BUNDLE_ID:-local.lpx-explorer}"   # set LPX_BUNDLE_ID for release builds (see docs/SIGNING.md)
 VERSION="$("$HERE/version.sh")"          # latest release tag, e.g. 0.1.0
 BUILD="$("$HERE/version.sh" --build)"   # commit count
 DESCRIBE="$("$HERE/version.sh" --describe)"  # e.g. 0.1.0-3-gabc123-dirty (what exactly is built)
@@ -34,7 +35,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0"><dict>
   <key>CFBundleName</key><string>LPX Explorer</string>
   <key>CFBundleDisplayName</key><string>LPX Explorer</string>
-  <key>CFBundleIdentifier</key><string>local.lpx-explorer</string>
+  <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
   <key>NSHumanReadableCopyright</key><string>© 2026 Good Loops · GPL-3.0-or-later. Based on LPX Explorer by Rhyd Lewis.</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleExecutable</key><string>LpxExplorer</string>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened-runtime entitlements for LPX Explorer. None are needed: the app is not sandboxed, makes no network requests,
+     loads no third-party code and only reads files the user points it at. Add keys here only with a reason. -->
+<plist version="1.0"><dict/></plist>

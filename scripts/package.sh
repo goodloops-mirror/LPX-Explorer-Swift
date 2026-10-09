@@ -2,8 +2,10 @@
 # Build the app and zip it for distribution: dist/LPX-Explorer-<version>.zip
 #   scripts/package.sh            package the current checkout
 #   scripts/package.sh v0.1.0     package exactly that release (built in a temporary worktree)
-# The app is ad-hoc signed, not notarized: on another Mac Gatekeeper blocks the first launch
+# Without a signing identity the app is only ad-hoc signed: on another Mac Gatekeeper blocks the first launch
 # (right-click → Open, or `xattr -dr com.apple.quarantine "LPX Explorer.app"`).
+# With LPX_SIGN_IDENTITY set it is signed with your Developer ID, and with LPX_NOTARY_PROFILE as well it is notarized and
+# stapled (scripts/sign-app.sh, docs/SIGNING.md) — then the zip opens everywhere without a warning.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
@@ -19,6 +21,9 @@ fi
 LPX_APP_SRC="$src" "$ROOT/scripts/make-app.sh"
 name="$(LPX_VERSION_REPO="$src" "$ROOT/scripts/version.sh" --describe)"
 cd "$src"
+if [ -n "${LPX_SIGN_IDENTITY:-}" ]; then
+  "$ROOT/scripts/sign-app.sh" "$src/build/LPX Explorer.app" ${LPX_NOTARY_PROFILE:+--notarize}
+fi
 zip="$ROOT/dist/LPX-Explorer-$name.zip"
 rm -f "$zip"
 ditto -c -k --keepParent --norsrc --noextattr --noqtn "build/LPX Explorer.app" "$zip"   # no ._ metadata files from HFS+ volumes
