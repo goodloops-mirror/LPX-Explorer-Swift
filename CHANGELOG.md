@@ -6,6 +6,8 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-09
+
 ### Added
 - Developer ID signing and notarization for releases: `scripts/sign-app.sh` (hardened runtime, secure timestamp, notarize, staple), used automatically by `package.sh` / `release.sh` when `LPX_SIGN_IDENTITY` (and `LPX_NOTARY_PROFILE`) are set; setup in `docs/SIGNING.md`. `LPX_BUNDLE_ID` sets the bundle identifier of release builds.
 - A new README with a screenshot.
