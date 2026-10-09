@@ -14,7 +14,7 @@ This is a rewrite of the original Tauri/React/Rust app, which is kept untouched 
 
 ## Releases
 
-Versions are git tags `vX.Y.Z` (semver; legacy Tauri tags `v0.0.x` are ignored); the app starts at v0.1.0. `CHANGELOG.md` keeps hand-written notes under *Unreleased*. `scripts/release.sh <major|minor|patch|X.Y.Z> [--dry-run]` runs the tests, writes the new CHANGELOG section (notes + commit subjects since the last tag, grouped by `feat:`/`fix:`/other), commits it and tags it — it never pushes. `scripts/version.sh` reads the version from the tags (used by `make-app.sh`); `scripts/test-release.sh` tests the scripts in a temp repo. Only cut a release when asked.
+Versions are git tags `vX.Y.Z` (semver; legacy Tauri tags `v0.0.x` are ignored); the app starts at v0.1.0. `CHANGELOG.md` keeps hand-written notes under *Unreleased*. `scripts/release.sh <major|minor|patch|X.Y.Z> [--dry-run]` runs the tests, writes the new CHANGELOG section (notes + commit subjects since the last tag, grouped by `feat:`/`fix:`/other), commits it and tags it — it never pushes. `scripts/package.sh` (run by `release.sh`) builds `dist/LPX-Explorer-<version>.dmg` — app + Applications shortcut (`make-dmg.sh`), signed and notarized when `LPX_SIGN_IDENTITY` / `LPX_NOTARY_PROFILE` are set (`sign-app.sh`, docs/SIGNING.md). `scripts/version.sh` reads the version from the tags (used by `make-app.sh`); `scripts/test-release.sh` tests the scripts in a temp repo. Only cut a release when asked.
 
 ## Layout
 

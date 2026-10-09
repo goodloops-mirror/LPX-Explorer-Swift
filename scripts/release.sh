@@ -6,7 +6,7 @@
 # The new CHANGELOG section = the hand-written notes under "## [Unreleased]"; when there are none,
 # the commit subjects since the previous release, grouped (feat: → Added, fix: → Fixed, everything else → Changed).
 # Conventional prefixes (feat:, fix:, perf:, refactor:, test:) are optional; docs: and chore: commits are left out of the notes.
-# After tagging it builds the app and zips it to dist/ (scripts/package.sh); --no-package skips that.
+# After tagging it builds the app and packages it as a DMG in dist/ (scripts/package.sh); --no-package skips that.
 # --dry-run prints the section and changes nothing.
 # Env: RELEASE_TRAILER="Co-Authored-By: …" is appended to the release commit message.
 # Env: LPX_RELEASE_REPO=<dir> runs against another repository (used by scripts/test-release.sh).

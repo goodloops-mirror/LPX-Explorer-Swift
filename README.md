@@ -51,11 +51,12 @@ Your projects are irreplaceable, so LPX Explorer is built never to change them:
 
 ## Install
 
-Download the latest `LPX-Explorer-vX.Y.Z.zip` from the
-[Releases](https://github.com/goodloops-mirror/LPX-Explorer-Swift/releases) page, unzip it and drag **LPX Explorer** into
-Applications. Requires macOS 14 (Sonoma) or later.
+Download the latest `LPX-Explorer-vX.Y.Z.dmg` from the
+[Releases](https://github.com/goodloops-mirror/LPX-Explorer-Swift/releases) page, open it and drag **LPX Explorer** onto the
+**Applications** shortcut. Requires macOS 14 (Sonoma) or later.
 
-Builds that are not signed with a Developer ID are blocked by macOS on first launch: right-click the app ▸ Open, or run
+Releases are signed with a Developer ID and notarized by Apple, so they open with a plain double-click. A build you make
+yourself is not, and macOS blocks it on first launch: right-click the app ▸ Open, or run
 `xattr -dr com.apple.quarantine "LPX Explorer.app"`.
 
 ## Using it

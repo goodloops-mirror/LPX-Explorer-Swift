@@ -34,15 +34,15 @@ export LPX_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
 export LPX_NOTARY_PROFILE="lpx-notary"
 ```
 
-Then the normal release does everything — build, sign (hardened runtime, secure timestamp), notarize, staple, zip:
+Then the normal release does everything — build the app, sign it (hardened runtime, secure timestamp), notarize and staple it, put it in a disk image (`.dmg`, with an Applications shortcut), sign that, notarize and staple it too. The DMG in `dist/` is what you publish:
 
 ```bash
-scripts/release.sh minor        # or: scripts/package.sh   for just the zip
+scripts/release.sh minor        # or: scripts/package.sh   for just the disk image
 ```
 
-- With only `LPX_SIGN_IDENTITY` set the app is signed but not notarized (fine for testing; Gatekeeper still objects elsewhere).
+- With only `LPX_SIGN_IDENTITY` set the app and the image are signed but not notarized (fine for testing; Gatekeeper still objects elsewhere).
 - Without either, the app is ad-hoc signed as before.
-- `scripts/sign-app.sh --dry-run [--notarize]` shows exactly what would run without running anything.
+- `scripts/sign-app.sh --dry-run [--notarize]` shows exactly what would run without running anything; it accepts the `.app` or the `.dmg`. `scripts/make-dmg.sh` builds just the image.
 
 ## Checking the result
 
@@ -50,9 +50,11 @@ scripts/release.sh minor        # or: scripts/package.sh   for just the zip
 codesign --verify --strict --verbose=2 "build/LPX Explorer.app"
 spctl --assess --type execute --verbose=4 "build/LPX Explorer.app"   # "accepted  source=Notarized Developer ID"
 xcrun stapler validate "build/LPX Explorer.app"
+spctl --assess --type open --context context:primary-signature --verbose=4 dist/LPX-Explorer-vX.Y.Z.dmg
+xcrun stapler validate dist/LPX-Explorer-vX.Y.Z.dmg
 ```
 
-The most honest test is the real one: download the zip on another Mac (so it gets the quarantine flag) and open it.
+The most honest test is the real one: download the dmg on another Mac (so it gets the quarantine flag) and open it.
 
 ## Bundle identifier
 
