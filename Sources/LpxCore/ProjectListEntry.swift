@@ -23,8 +23,13 @@ public struct ProjectListEntry: Codable, Equatable, Hashable, Sendable {
     /// Case/diacritic-folded text that search matches against: project name, custom and channel track
     /// names, and alternative names. (Plug-in names depend on the AU registry and are added at query time.)
     public var searchText: String
+    /// "lso" for a single-file Logic 4–9 project: listed by name, contents not read. Optional so entries cached before this
+    /// existed still decode.
+    public var legacyFormat: String?
+    public var isLegacy: Bool { legacyFormat != nil }
 
     public init(summary: ProjectSummary) {
+        legacyFormat = summary.legacyFormat
         path = summary.path
         metadata = summary.metadata
         projectDataMTime = summary.projectDataMTime

@@ -70,6 +70,8 @@ LPX Explorer is its own app now; the Tauri code in `legacy-tauri/` is only a for
 
 - [x] **Older Logic files** (Logic Pro X 10.5.1 and earlier): `karT` track records are 92 bytes (record version 4) instead of 93 (version 5) — same field offsets, one byte less of tail — and object records are not preceded by four zero bytes (the first two belong to the previous text). `ArrangementList` accepts both record sizes; `TrackObjects.complete` adds lenient matches only for object keys the strict pass missed. Verified against the same project re-saved with Logic Pro 11.2.2 (`GoldenLegacyFormatTests`). Other Logic versions in between are untested.
 
+- [x] **`.lso` (Logic 4–9) files are listed** by name/size/dates only (`ProjectParser.legacySummary`, `LegacyProjectView`). Research notes for reading them (5 samples + their Logic 11.2.2 re-saves in `example_projects`): header `ab c0 47 13 05 <v> 00 15 …`; Environment objects are 256-byte records (frame `11 <id> 00 … 01 <x> 00 <type> 00 00 00 00 ff ff … 20 <name>`) in one table (Audio 1…128/64, Inst, Aux, Bus 1…31, Bus32, Out 1-2…17-18, Master Volume); all track names of the re-saves occur there, but which objects are *tracks* (a prefix of each group; one object can carry several tracks) is not stored in the object — the arrange track list/usage counts are not found yet. A minimal old-Logic test song would settle it. `Sounds 1` (2004) has no extension, so it is not discovered.
+
 ## Open
 - [ ] Track hierarchy: `parentOffset`/`subNumber` are never set; folders/stacks render flat
 - [ ] Golden tests take ~25 s (debug build); `swift test --filter` for quick runs

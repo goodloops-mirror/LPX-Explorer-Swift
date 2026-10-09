@@ -6,6 +6,9 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+### Added
+- Single-file Logic 4–9 projects (`.lso`) are found when scanning a folder and listed like projects, marked "Legacy .lso project": they can be found by name, revealed in Finder and matched with their bounces. Their contents (tracks, tempo, plug-ins) are not read; the detail pane says so. The file is never written to.
+
 ### Fixed
 - Projects converted from older Logic versions (and a few tracks in others) show the names of all their tracks: object records whose id is above 255 are now read, as a last fallback and only for objects nothing milder could find. Checked on all example projects: besides the converted "Spacey", only one previously blank hidden track in the two LSK projects changed (it now has its name). The library is re-read once.
 

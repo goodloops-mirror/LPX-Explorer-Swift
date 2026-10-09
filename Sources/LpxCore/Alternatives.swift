@@ -65,10 +65,11 @@ public enum ProjectBundle {
         (try? Data(contentsOf: informationPlistURL(bundle))).flatMap(AlternativesManifest.lastSavedFrom)
     }
 
-    /// Bundle basename without the `.logicx` extension (any case).
+    /// Project name: the basename without the `.logicx` (or old `.lso`) extension, any case.
     public static func bundleName(_ bundle: URL) -> String {
         let name = bundle.lastPathComponent
-        return name.lowercased().hasSuffix(".logicx") ? String(name.dropLast(".logicx".count)) : name
+        for ext in [".logicx", ".lso"] where name.lowercased().hasSuffix(ext) { return String(name.dropLast(ext.count)) }
+        return name
     }
 
     /// Alternatives inside a bundle. A missing/invalid manifest on a bundle that still has

@@ -20,6 +20,9 @@ public struct ProjectSummary: Equatable, Sendable, Codable {
     public var lastSavedFrom: String?
     /// Which `Alternatives/<NNN>/` this summary was parsed from.
     public var variant: Int = 0
+    /// Set for projects whose contents can't be read: "lso" for single-file Logic 4–9 projects. Such a summary only has
+    /// file facts (name, size, dates); everything else is empty.
+    public var legacyFormat: String?
 }
 
 public enum ParseError: Error, Equatable {
@@ -32,6 +35,7 @@ public enum ParseError: Error, Equatable {
 public enum ProjectParser {
     /// Read-only: opens files for reading, never writes inside the bundle.
     public static func parse(bundle: URL, variant: Int? = nil) throws -> ProjectSummary {
+        if isLegacyFile(bundle) { return try legacySummary(bundle) }
         let fm = FileManager.default
         let located: URL?
         if let variant {
@@ -78,9 +82,27 @@ public enum ProjectParser {
     /// Cheap cache-validation stat of the ProjectData file only.
     public static func projectDataStat(bundle: URL) -> (mtime: Int64, size: UInt64)? {
         let fm = FileManager.default
+        if isLegacyFile(bundle) {
+            guard let attrs = try? fm.attributesOfItem(atPath: bundle.path) else { return nil }
+            return (unixSeconds(attrs[.modificationDate] as? Date), (attrs[.size] as? NSNumber)?.uint64Value ?? 0)
+        }
         guard let alt = locateAlternative(bundle, fm),
               let attrs = try? fm.attributesOfItem(atPath: alt.appendingPathComponent("ProjectData").path) else { return nil }
         return (unixSeconds(attrs[.modificationDate] as? Date), (attrs[.size] as? NSNumber)?.uint64Value ?? 0)
+    }
+
+    /// A single-file Logic 4–9 project (`.lso`).
+    static func isLegacyFile(_ url: URL) -> Bool { url.pathExtension.lowercased() == "lso" }
+
+    /// What can be said about an `.lso` without understanding it: its name, size and dates. The file is never written.
+    static func legacySummary(_ url: URL) throws -> ProjectSummary {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else { throw ParseError.io("can't read \(url.path)") }
+        let modified = unixSeconds(attrs[.modificationDate] as? Date)
+        let created = (attrs[.creationDate] as? Date).map { unixSeconds($0) } ?? modified
+        let size = (attrs[.size] as? NSNumber)?.uint64Value ?? 0
+        return ProjectSummary(path: url.path, fingerprints: [], tracks: [], metadata: ProjectMetadata(),
+                              stats: BundleStats(sizeBytes: size, createdAt: created, modifiedAt: modified),
+                              projectDataMTime: modified, projectDataSize: size, legacyFormat: "lso")
     }
 
     /// Lowest-numbered `Alternatives/<n>/` that contains ProjectData (deterministic).

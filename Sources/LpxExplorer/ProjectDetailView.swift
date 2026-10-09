@@ -168,6 +168,10 @@ struct ProjectDetailView: View {
     @AppStorage("showTracksPane") private var showTracksPane = true
 
     var body: some View {
+        if base.legacyFormat != nil { LegacyProjectView(summary: base) } else { projectBody }
+    }
+
+    private var projectBody: some View {
         HSplitView {
             infoPane.frame(minWidth: 320, idealWidth: 360, maxWidth: .infinity)
             if showTracksPane {

@@ -6,9 +6,9 @@ public enum DiscoveryError: Error, Equatable {
 }
 
 public enum LogicxDiscovery {
-    /// Walk `root` and return every `.logicx` bundle. Bundles are leaves (Logic
-    /// never nests projects), symlinks are not followed, and unreadable subtrees
-    /// are skipped. Only an unreadable *root* is an error.
+    /// Walk `root` and return every `.logicx` bundle and every single-file `.lso` project (Logic 4–9). Bundles are leaves
+    /// (Logic never nests projects), symlinks are not followed, and unreadable subtrees are skipped. Only an unreadable
+    /// *root* is an error.
     public static func discover(in root: URL, isCancelled: () -> Bool = { false }) throws -> [URL] {
         let fm = FileManager.default
         var isDir: ObjCBool = false
@@ -29,8 +29,11 @@ public enum LogicxDiscovery {
         guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys) else { return }
         for url in entries {
             if isCancelled() { return }
-            guard let v = try? url.resourceValues(forKeys: Set(keys)),
-                  v.isDirectory == true, v.isSymbolicLink != true else { continue }
+            guard let v = try? url.resourceValues(forKeys: Set(keys)), v.isSymbolicLink != true else { continue }
+            if v.isDirectory != true {
+                if url.pathExtension.lowercased() == "lso" { out.append(url) }   // a plain file: the old single-file project
+                continue
+            }
             if url.lastPathComponent.lowercased().hasSuffix(".logicx") {
                 out.append(url)
             } else {

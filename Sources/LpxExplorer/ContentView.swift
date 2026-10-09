@@ -189,7 +189,12 @@ struct ProjectRow: View {
                         .background(.quaternary, in: Capsule()).help("\(n) alternatives")
                 }
             }
-            if let e = entry {
+            if let e = entry, e.isLegacy {
+                Text("Legacy .lso project · \(ByteCountFormatter.string(fromByteCount: Int64(e.projectDataSize), countStyle: .file))")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(URL(fileURLWithPath: path).deletingLastPathComponent().path)
+                    .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+            } else if let e = entry {
                 Text("\(Int(e.metadata.bpm.rounded())) BPM · \(e.visibleTrackCount) tracks · \(e.plugins.count) plug-ins")
                     .font(.caption).foregroundStyle(.secondary)
                 Text(URL(fileURLWithPath: path).deletingLastPathComponent().path)

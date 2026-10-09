@@ -429,7 +429,7 @@ final class LibraryModel {
     }
 
     func verdict(for path: String) -> CompatibilityVerdict? {
-        entries[path].map { CompatibilityVerdict.evaluate(plugins: $0.plugins.map(\.ref), installed: registry.installed) }
+        entries[path].flatMap { $0.isLegacy ? nil : $0 }.map { CompatibilityVerdict.evaluate(plugins: $0.plugins.map(\.ref), installed: registry.installed) }
     }
 
     func applySimilarity(_ axis: SimilarityAxis) {

@@ -60,7 +60,7 @@ GPL-3.0-or-later (`LICENSE`), because this app is a port of the GPL-3.0 original
 
 ## Scan & storage architecture
 
-`LogicxDiscovery` walks folders (bundles are leaves) → `LibraryScanner.scan` parses with a bounded worker pool (default 70% of logical cores). Whether a project changed is decided from a **stamp** (ProjectData mtime+size) kept in SQLite, so unchanged projects are never read: `LibraryScanner.changedBundles` stats them in parallel and only the new/modified ones are parsed.
+`LogicxDiscovery` walks folders (`.logicx` bundles are leaves; single-file `.lso` Logic 4–9 projects are listed too, as file facts only — `ProjectSummary.legacyFormat`) → `LibraryScanner.scan` parses with a bounded worker pool (default 70% of logical cores). Whether a project changed is decided from a **stamp** (ProjectData mtime+size) kept in SQLite, so unchanged projects are never read: `LibraryScanner.changedBundles` stats them in parallel and only the new/modified ones are parsed.
 
 Storage is `SummaryDatabase` (SQLite via the system `sqlite3`, `~/Library/Application Support/LpxExplorer/library.sqlite`, WAL):
 - `entries` — a small `ProjectListEntry` per project (metadata, unique plug-ins with counts, track count, folded search text). Loaded in the background at launch (~0.3 s for 3,000 projects) and held in memory for the list, search, filters, verdicts and the plug-in view.
