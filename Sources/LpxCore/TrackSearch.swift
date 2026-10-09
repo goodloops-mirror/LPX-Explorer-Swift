@@ -118,11 +118,11 @@ public enum ProjectSearch {
     }
 
     /// - Parameters: `projectName` and `pluginText` are folded; `entry.searchText` already is.
-    public static func matches(_ q: Query, entry: ProjectListEntry, projectName: String, pluginText: String) -> Bool {
+    public static func matches(_ q: Query, entry: ProjectListEntry, projectName: String, pluginText: String, tagText: String = "") -> Bool {
         guard !q.isEmpty, !q.restrictsTracks else { return false }
         func has(_ haystack: String, _ terms: [String]) -> Bool { SearchMatcher.matches(haystack: haystack, terms: terms) }
         // Free terms: each anywhere. (`searchText` = project name + track, channel and object names + alternatives.)
-        for t in q.terms where !has(entry.searchText, [t]) && !has(pluginText, [t]) { return false }
+        for t in q.terms where !has(entry.searchText, [t]) && !has(pluginText, [t]) && !has(tagText, [t]) { return false }
         return has(projectName, q.projectTerms) && has(entry.searchText, q.nameTerms) && has(pluginText, q.pluginTerms)
     }
 }

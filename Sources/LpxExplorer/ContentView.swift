@@ -167,50 +167,91 @@ struct FilterChips: View {
     }
 }
 
+/// Widths of the optional list columns (fixed: the row and the header above the list have to line up).
+enum ProjectColumnLayout {
+    static let rowInsets = EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12)
+    static func width(_ column: ProjectColumn) -> CGFloat {
+        switch column {
+        case .dateModified, .dateCreated, .dateSaved: 76
+        case .size: 62
+        case .tags: 130
+        }
+    }
+}
+
+/// The values of the visible optional columns for one project.
+struct ProjectColumnCells: View {
+    @Environment(LibraryModel.self) private var model
+    let path: String
+
+    private func date(_ seconds: Int64?) -> String {
+        guard let seconds, seconds > 0 else { return "—" }
+        return Date(timeIntervalSince1970: TimeInterval(seconds)).formatted(date: .numeric, time: .omitted)
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            ForEach(ProjectColumn.allCases.filter(model.visibleColumns.contains), id: \.self) { column in
+                Group {
+                    switch column {
+                    case .dateModified: Text(date(model.modifiedDate(path)))
+                    case .dateCreated: Text(date(model.createdDate(path)))
+                    case .dateSaved: Text(date(model.savedDate(path)))
+                    case .size: Text(model.sizeBytes(path).map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "—")
+                    case .tags: Text(model.tags(path).joined(separator: ", "))
+                    }
+                }
+                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                .frame(width: ProjectColumnLayout.width(column), alignment: column == .tags ? .leading : .trailing)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
 struct ProjectRow: View {
     @Environment(LibraryModel.self) private var model
     let path: String
 
     var body: some View {
         let entry = model.entries[path]
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(LibraryModel.projectName(path)).fixedSize(horizontal: false, vertical: true)
-                if let v = model.verdict(for: path), !v.missing.isEmpty {
-                    Image(systemName: v.status == .willNotOpen ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
-                        .foregroundStyle(v.status == .willNotOpen ? .red : .orange)
-                        .help(v.headline)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(LibraryModel.projectName(path)).fixedSize(horizontal: false, vertical: true)
+                    if let v = model.verdict(for: path), !v.missing.isEmpty {
+                        Image(systemName: v.status == .willNotOpen ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(v.status == .willNotOpen ? .red : .orange)
+                            .help(v.headline)
+                    }
+                    if model.hasBounce(path) {
+                        Image(systemName: "waveform").foregroundStyle(.secondary).help("Has a bounce")
+                    }
+                    if let n = entry?.alternativeCount, n > 1 {
+                        Text("\(n) alts").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(.quaternary, in: Capsule()).help("\(n) alternatives")
+                    }
                 }
-                if model.hasBounce(path) {
-                    Image(systemName: "waveform").foregroundStyle(.secondary).help("Has a bounce")
-                }
-                if let n = entry?.alternativeCount, n > 1 {
-                    Text("\(n) alts").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(.quaternary, in: Capsule()).help("\(n) alternatives")
-                }
-                Spacer(minLength: 8)
-                // The date the list can be sorted by: when Logic last saved the project (the file's own date for old .lso files).
-                if let e = entry, e.projectDataMTime > 0 {
-                    Text(Date(timeIntervalSince1970: TimeInterval(e.projectDataMTime)).formatted(date: .abbreviated, time: .omitted))
-                        .font(.caption).monospacedDigit().foregroundStyle(.secondary).help("Date saved")
+                if let e = entry, e.isLegacy {
+                    Text("Legacy .lso project · \(ByteCountFormatter.string(fromByteCount: Int64(e.projectDataSize), countStyle: .file))")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(URL(fileURLWithPath: path).deletingLastPathComponent().path)
+                        .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+                } else if let e = entry {
+                    Text("\(Int(e.metadata.bpm.rounded())) BPM · \(e.visibleTrackCount) tracks · \(e.plugins.count) plug-ins")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(URL(fileURLWithPath: path).deletingLastPathComponent().path)
+                        .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+                } else if model.errors[path] != nil {
+                    Label("Can't read", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                } else {
+                    Text("Reading…").font(.caption).foregroundStyle(.tertiary)
                 }
             }
-            if let e = entry, e.isLegacy {
-                Text("Legacy .lso project · \(ByteCountFormatter.string(fromByteCount: Int64(e.projectDataSize), countStyle: .file))")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text(URL(fileURLWithPath: path).deletingLastPathComponent().path)
-                    .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
-            } else if let e = entry {
-                Text("\(Int(e.metadata.bpm.rounded())) BPM · \(e.visibleTrackCount) tracks · \(e.plugins.count) plug-ins")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text(URL(fileURLWithPath: path).deletingLastPathComponent().path)
-                    .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
-            } else if model.errors[path] != nil {
-                Label("Can't read", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
-            } else {
-                Text("Reading…").font(.caption).foregroundStyle(.tertiary)
-            }
+            Spacer(minLength: 4)
+            ProjectColumnCells(path: path)
         }
+        .listRowInsets(ProjectColumnLayout.rowInsets)
         .tag(path)
         .contextMenu {
             Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
@@ -287,7 +328,11 @@ struct MiddlePane: View {
     @Environment(LibraryModel.self) private var model
 
     private func orderLabels(_ field: ProjectSortField) -> (first: String, second: String) {
-        field == .name ? ("A to Z", "Z to A") : ("Oldest first", "Newest first")
+        switch field {
+        case .name: ("A to Z", "Z to A")
+        case .size: ("Smallest first", "Largest first")
+        default: ("Oldest first", "Newest first")
+        }
     }
 
     var body: some View {
@@ -295,6 +340,7 @@ struct MiddlePane: View {
         // results view, and a bar attached to the swapped view was rebuilt with it, which dropped the text field's focus.
         VStack(spacing: 0) {
             SearchFilterBar()
+            ProjectColumnHeader()
             Group {
                 if model.isSearching { SearchResultsView() } else { ProjectListView() }
             }
@@ -463,5 +509,52 @@ struct SearchFilterBar: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
         .background(.bar)
+    }
+}
+
+/// Column titles above the project list. Click one to sort by it (again to reverse); right-click anywhere on the bar to choose
+/// which columns are shown, as in Finder.
+struct ProjectColumnHeader: View {
+    @Environment(LibraryModel.self) private var model
+
+    private func title(_ text: String, field: ProjectSortField?) -> some View {
+        let active = field != nil && model.sortOrder.field == field
+        return Button {
+            guard let field else { return }
+            if model.sortOrder.field == field { model.sortOrder.ascending.toggle() } else { model.sortOrder = .initial(for: field) }
+        } label: {
+            HStack(spacing: 3) {
+                Text(text).fontWeight(active ? .semibold : .regular)
+                if active { Image(systemName: model.sortOrder.ascending ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .bold)) }
+            }
+        }
+        .buttonStyle(.plain).disabled(field == nil)
+        .help(field == nil ? text : "Sort by \(text.lowercased())")
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            title("Name", field: .name)
+            Spacer(minLength: 4)
+            ForEach(ProjectColumn.allCases.filter(model.visibleColumns.contains), id: \.self) { column in
+                title(column.rawValue, field: column.sortField)
+                    .frame(width: ProjectColumnLayout.width(column), alignment: column == .tags ? .leading : .trailing)
+            }
+        }
+        .font(.caption).foregroundStyle(.secondary)
+        .padding(.leading, ProjectColumnLayout.rowInsets.leading).padding(.trailing, ProjectColumnLayout.rowInsets.trailing).padding(.vertical, 4)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+        .contentShape(Rectangle())
+        .contextMenu {
+            ForEach(ProjectColumn.allCases, id: \.self) { column in
+                Toggle(column.rawValue, isOn: Binding(
+                    get: { model.visibleColumns.contains(column) },
+                    set: { if $0 { model.visibleColumns.insert(column) } else { model.visibleColumns.remove(column) } }))
+            }
+            Divider()
+            Button("Reset Columns") { model.visibleColumns = ProjectColumn.defaultVisible }
+        }
     }
 }

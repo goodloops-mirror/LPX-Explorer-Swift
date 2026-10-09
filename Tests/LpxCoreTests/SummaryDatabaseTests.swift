@@ -248,3 +248,36 @@ final class LegacyCacheCleanupTests: XCTestCase {
         SummaryDatabase.removeLegacyJSONCache(in: URL(fileURLWithPath: "/no/such/lpx-dir"))
     }
 }
+
+final class FileInfoDatabaseTests: XCTestCase {
+    func testFileInfoIsRememberedAndReplacedPerProject() async throws {
+        let db = try SummaryDatabase(url: try Fixture.tempDir().appendingPathComponent("library.sqlite"))
+        let a = ProjectFileInfo(created: 10, modified: 20, tags: ["Red", "Client X"]), b = ProjectFileInfo(created: 11, modified: 21, tags: [])
+        try await db.saveFileInfo(["/m/A.logicx": a, "/m/B.logicx": b])
+        let first = try await db.fileInfo()
+        XCTAssertEqual(first["/m/A.logicx"], a)
+        XCTAssertEqual(first["/m/B.logicx"], b)
+
+        let a2 = ProjectFileInfo(created: 10, modified: 99, tags: ["Final"])
+        try await db.saveFileInfo(["/m/A.logicx": a2])
+        let second = try await db.fileInfo()
+        XCTAssertEqual(second["/m/A.logicx"], a2)
+        XCTAssertEqual(second["/m/B.logicx"], b, "other projects are untouched")
+    }
+
+    func testTagsWithAwkwardCharactersSurvive() async throws {
+        let db = try SummaryDatabase(url: try Fixture.tempDir().appendingPathComponent("library.sqlite"))
+        let info = ProjectFileInfo(created: 1, modified: 2, tags: ["Café \"Müller\"", "a,b", "with\nnewline", "日本語"])
+        try await db.saveFileInfo(["/m/A.logicx": info])
+        let all = try await db.fileInfo()
+        XCTAssertEqual(all["/m/A.logicx"], info)
+    }
+
+    func testRemovingAProjectForgetsItsFileInfo() async throws {
+        let db = try SummaryDatabase(url: try Fixture.tempDir().appendingPathComponent("library.sqlite"))
+        try await db.saveFileInfo(["/m/A.logicx": ProjectFileInfo(created: 1, modified: 2, tags: ["x"])])
+        try await db.remove(paths: ["/m/A.logicx"])
+        let all = try await db.fileInfo()
+        XCTAssertTrue(all.isEmpty)
+    }
+}

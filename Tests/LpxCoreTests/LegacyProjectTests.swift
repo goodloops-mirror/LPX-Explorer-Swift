@@ -117,3 +117,72 @@ final class LegacyProjectTests: XCTestCase {
         XCTAssertEqual(BounceFinder.find(project: url).map(\.fileName), ["Spacey MIX ALL.wav"])
     }
 }
+
+final class ProjectFileInfoTests: XCTestCase {
+    func testReadsDatesAndAllTagsOfAProject() throws {
+        let dir = try Fixture.tempDir()
+        let project = try Fixture.logicx(in: dir, name: "Song.logicx")
+        try (project as NSURL).setResourceValue(["Red", "Client X", "Final mix"], forKey: .tagNamesKey)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_700_000_000), .creationDate: Date(timeIntervalSince1970: 1_600_000_000)], ofItemAtPath: project.path)
+
+        let info = try XCTUnwrap(ProjectFileInfo.read(project))
+        XCTAssertEqual(info.modified, 1_700_000_000)
+        XCTAssertEqual(info.created, 1_600_000_000)
+        XCTAssertEqual(Set(info.tags), ["Red", "Client X", "Final mix"])
+    }
+
+    func testAProjectWithoutTagsHasNone() throws {
+        let dir = try Fixture.tempDir()
+        XCTAssertEqual(ProjectFileInfo.read(try Fixture.logicx(in: dir, name: "Plain.logicx"))?.tags, [])
+    }
+
+    func testLegacyFilesHaveDatesAndTagsToo() throws {
+        let dir = try Fixture.tempDir()
+        let url = dir.appendingPathComponent("Old.lso")
+        try Data([1, 2, 3]).write(to: url)
+        try (url as NSURL).setResourceValue(["Archive"], forKey: .tagNamesKey)
+        let info = try XCTUnwrap(ProjectFileInfo.read(url))
+        XCTAssertEqual(info.tags, ["Archive"])
+        XCTAssertGreaterThan(info.modified, 0)
+    }
+
+    func testAMissingProjectGivesNilNotAnEmptyAnswer() {
+        XCTAssertNil(ProjectFileInfo.read(URL(fileURLWithPath: "/Volumes/not-mounted/Song.logicx")))
+    }
+
+    func testReadingNeverChangesTheProject() throws {
+        let dir = try Fixture.tempDir()
+        let project = try Fixture.logicx(in: dir, name: "Song.logicx")
+        let before = try FileManager.default.attributesOfItem(atPath: project.path)[.modificationDate] as? Date
+        _ = ProjectFileInfo.read(project)
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: project.path)[.modificationDate] as? Date, before)
+    }
+
+    func testEntriesCarryTheSizeAndDatesOfTheirSummary() throws {
+        let dir = try Fixture.tempDir()
+        let summary = try ProjectParser.parse(bundle: try Fixture.logicx(in: dir, name: "Song.logicx"))
+        let entry = ProjectListEntry(summary: summary)
+        XCTAssertEqual(entry.sizeBytes, summary.stats.sizeBytes)
+        XCTAssertEqual(entry.createdAt, summary.stats.createdAt)
+        XCTAssertEqual(entry.modifiedAt, summary.stats.modifiedAt)
+        XCTAssertGreaterThan(entry.sizeBytes ?? 0, 0)
+    }
+
+    func testEntriesCachedBeforeTheseFieldsStillDecode() throws {
+        let dir = try Fixture.tempDir()
+        let entry = ProjectListEntry(summary: try ProjectParser.parse(bundle: try Fixture.logicx(in: dir, name: "Song.logicx")))
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(entry)) as! [String: Any]
+        for key in ["sizeBytes", "createdAt", "modifiedAt"] { json[key] = nil }
+        let decoded = try JSONDecoder().decode(ProjectListEntry.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(decoded.sizeBytes); XCTAssertNil(decoded.createdAt)
+    }
+
+    func testTagsAreFoundByTheProjectSearch() throws {
+        let dir = try Fixture.tempDir()
+        let entry = ProjectListEntry(summary: try ProjectParser.parse(bundle: try Fixture.logicx(in: dir, name: "Song.logicx")))
+        let q = ProjectSearch.Query(terms: ["client"])
+        XCTAssertFalse(ProjectSearch.matches(q, entry: entry, projectName: "song", pluginText: ""))
+        XCTAssertTrue(ProjectSearch.matches(q, entry: entry, projectName: "song", pluginText: "", tagText: "red\nclient x"))
+        XCTAssertTrue(ProjectSearch.matches(ProjectSearch.Query(terms: ["song", "client"]), entry: entry, projectName: "song", pluginText: "", tagText: "client x"))
+    }
+}

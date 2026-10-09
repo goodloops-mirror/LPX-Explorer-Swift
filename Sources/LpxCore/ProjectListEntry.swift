@@ -27,9 +27,17 @@ public struct ProjectListEntry: Codable, Equatable, Hashable, Sendable {
     /// existed still decode.
     public var legacyFormat: String?
     public var isLegacy: Bool { legacyFormat != nil }
+    /// Size of the project on disk and its Finder dates as found when it was parsed (the list refreshes the dates in the
+    /// background, see `ProjectFileInfo`). Optional so entries cached before these existed still decode.
+    public var sizeBytes: UInt64?
+    public var createdAt: Int64?
+    public var modifiedAt: Int64?
 
     public init(summary: ProjectSummary) {
         legacyFormat = summary.legacyFormat
+        sizeBytes = summary.stats.sizeBytes
+        createdAt = summary.stats.createdAt
+        modifiedAt = summary.stats.modifiedAt
         path = summary.path
         metadata = summary.metadata
         projectDataMTime = summary.projectDataMTime

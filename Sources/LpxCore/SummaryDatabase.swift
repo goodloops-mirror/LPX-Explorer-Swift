@@ -23,7 +23,7 @@ public enum DatabaseError: Error, Equatable { case sqlite(String) }
 /// search and filters, and the full `ProjectSummary` loaded on demand when a project is selected.
 public actor SummaryDatabase {
     /// Bump when parser output changes so stale rows are discarded on the next launch.
-    public static let parserVersion = 8
+    public static let parserVersion = 9
     /// Wipes everything (a full re-parse) when bumped: only for changes to `entries` / `details` / `failures`.
     private static let schemaVersion = 3
     /// Layout/content of the derived `tracks` table. Bumping it rebuilds that table from `details` (no re-parse).
@@ -157,6 +157,7 @@ public actor SummaryDatabase {
                 try run("DELETE FROM tracks WHERE path = ?", [.text(p)])
                 try run("DELETE FROM failures WHERE path = ?", [.text(p)])
                 try run("DELETE FROM bounce_index WHERE project_path = ?", [.text(p)])
+                try run("DELETE FROM file_info WHERE project_path = ?", [.text(p)])
             }
             try exec("COMMIT")
         } catch {
@@ -312,6 +313,32 @@ public actor SummaryDatabase {
         return out
     }
 
+    /// Replace the remembered Finder dates and tags of these projects.
+    public func saveFileInfo(_ byProject: [String: ProjectFileInfo]) throws {
+        guard !byProject.isEmpty else { return }
+        try exec("BEGIN IMMEDIATE")
+        do {
+            for (project, info) in byProject {
+                let tags = String(decoding: (try? encoder.encode(info.tags)) ?? Data("[]".utf8), as: UTF8.self)
+                try run("INSERT OR REPLACE INTO file_info(project_path, created, modified, tags) VALUES (?,?,?,?)",
+                        [.text(project), .int(info.created), .int(info.modified), .text(tags)])
+            }
+            try exec("COMMIT")
+        } catch {
+            try? exec("ROLLBACK")
+            throw error
+        }
+    }
+
+    public func fileInfo() throws -> [String: ProjectFileInfo] {
+        var out: [String: ProjectFileInfo] = [:]
+        try query("SELECT project_path, created, modified, tags FROM file_info") { stmt in
+            let tags = (try? decoder.decode([String].self, from: Data(text(stmt, 3).utf8))) ?? []
+            out[text(stmt, 0)] = ProjectFileInfo(created: sqlite3_column_int64(stmt, 1), modified: sqlite3_column_int64(stmt, 2), tags: tags)
+        }
+        return out
+    }
+
     public func count() throws -> Int {
         var n = 0
         try query("SELECT COUNT(*) FROM entries") { n = Int(sqlite3_column_int64($0, 0)) }
@@ -355,6 +382,7 @@ public actor SummaryDatabase {
             DROP TABLE IF EXISTS bounces;
             DROP TABLE IF EXISTS bounce_files;
             CREATE TABLE IF NOT EXISTS bounce_index(project_path TEXT NOT NULL, ord INTEGER NOT NULL, file_path TEXT NOT NULL, file_name TEXT NOT NULL, kind TEXT NOT NULL, stem INTEGER, stem_label TEXT, size INTEGER NOT NULL, mtime INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS file_info(project_path TEXT PRIMARY KEY, created INTEGER NOT NULL, modified INTEGER NOT NULL, tags TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS bounce_index_project ON bounce_index(project_path);
             CREATE INDEX IF NOT EXISTS tracks_path ON tracks(path);
             """)

@@ -33,7 +33,7 @@ final class LibraryModel {
     private(set) var isLoadingCache = false
     /// The on-disk library couldn't be opened: this session starts from scratch and nothing is remembered.
     private(set) var cacheUnavailable = false
-    private(set) var isScanning = false { didSet { if oldValue && !isScanning { scheduleSearch(); syncBounces() } } }
+    private(set) var isScanning = false { didSet { if oldValue && !isScanning { scheduleSearch(); syncBounces(); syncFileInfo() } } }
     private(set) var scanTotal = 0
     private(set) var scanDone = 0
     private(set) var scanMessage: String?
@@ -74,7 +74,14 @@ final class LibraryModel {
     }
 
     private func applyResultOrder() {
-        results = ProjectSorting.sorted(nameSortedResults, by: sortOrder, path: \.path, date: { self.entries[$0]?.projectDataMTime })
+        results = ProjectSorting.sorted(nameSortedResults, by: sortOrder, path: \.path, value: sortValue)
+    }
+    /// Finder dates and tags of each project (cached in SQLite; re-read from disk in the background after every scan).
+    private(set) var fileInfo: [String: ProjectFileInfo] = [:]
+    @ObservationIgnored private var fileInfoTask: Task<Void, Never>?
+    /// The optional list columns that are shown (remembered between launches).
+    var visibleColumns: Set<ProjectColumn> = ProjectColumn.decode(UserDefaults.standard.stringArray(forKey: "projectColumns")) {
+        didSet { UserDefaults.standard.set(ProjectColumn.encode(visibleColumns), forKey: "projectColumns") }
     }
     /// Bounces found next to / inside each project (cached in SQLite; refreshed in the background).
     private(set) var bounces: [String: [BounceFile]] = [:]
@@ -147,6 +154,7 @@ final class LibraryModel {
             // Projects that failed to parse stay failed until their file changes (no retry at every launch).
             for (path, message) in (try? await db.failures()) ?? [:] where entries[path] == nil { errors[path] = message }
             bounces = (try? await db.bounces()) ?? [:]
+            fileInfo = (try? await db.fileInfo()) ?? [:]
             Task { _ = try? await db.rebuildTracksIfNeeded() } // derived search rows; cheap and never a re-parse
             for folder in folders where folderProjects[folder] == nil {
                 // Provisional list straight from the cache; discovery below confirms it.
@@ -190,7 +198,7 @@ final class LibraryModel {
         let gone = folderProjects[path] ?? []
         folderProjects[path] = nil
         sortedByFolder[path] = nil
-        for p in gone where !folders.contains(where: { (folderProjects[$0] ?? []).contains(p) }) { entries[p] = nil; errors[p] = nil; bounces[p] = nil }
+        for p in gone where !folders.contains(where: { (folderProjects[$0] ?? []).contains(p) }) { entries[p] = nil; errors[p] = nil; bounces[p] = nil; fileInfo[p] = nil }
         if let db { Task { try? await db.remove(paths: gone) } }
         UserDefaults.standard.set(folders, forKey: Self.foldersKey)
         if selectedFolder == path { selectedFolder = folders.first }
@@ -335,6 +343,58 @@ final class LibraryModel {
         selectedProject = path
     }
 
+    // MARK: columns: dates, size, tags
+
+    /// Finder's dates win over the ones read when the project was parsed: they are refreshed after every scan.
+    func modifiedDate(_ path: String) -> Int64? { fileInfo[path]?.modified ?? entries[path]?.modifiedAt }
+    func createdDate(_ path: String) -> Int64? { fileInfo[path]?.created ?? entries[path]?.createdAt }
+    func savedDate(_ path: String) -> Int64? { entries[path]?.projectDataMTime }
+    func sizeBytes(_ path: String) -> Int64? { entries[path]?.sizeBytes.map { Int64(clamping: $0) } }
+    func tags(_ path: String) -> [String] { fileInfo[path]?.tags ?? [] }
+
+    /// The number a project is sorted by for the current field (dates in seconds, size in bytes).
+    private func sortValue(_ path: String) -> Int64? {
+        switch sortOrder.field {
+        case .name: nil
+        case .dateModified: modifiedDate(path)
+        case .dateCreated: createdDate(path)
+        case .dateSaved: savedDate(path)
+        case .size: sizeBytes(path)
+        }
+    }
+
+    /// Folded tag names for the project-level search.
+    private func tagText(_ path: String) -> String {
+        guard let tags = fileInfo[path]?.tags, !tags.isEmpty else { return "" }
+        return SearchMatcher.fold(tags.joined(separator: "\n"))
+    }
+
+    /// Re-read every project's dates and tags from the file system in the background and remember what changed. A project
+    /// that can't be seen right now (drive offline) keeps what was cached.
+    func syncFileInfo() {
+        fileInfoTask?.cancel()
+        let projects = Array(entries.keys)
+        let known = fileInfo
+        guard !projects.isEmpty else { return }
+        fileInfoTask = Task { [weak self] in
+            let found = await Task.detached(priority: .utility) { () -> [String: ProjectFileInfo] in
+                let lock = NSLock()
+                var out: [String: ProjectFileInfo] = [:]
+                DispatchQueue.concurrentPerform(iterations: projects.count) { i in
+                    guard let info = ProjectFileInfo.read(URL(fileURLWithPath: projects[i])) else { return }
+                    lock.lock(); out[projects[i]] = info; lock.unlock()
+                }
+                return out
+            }.value
+            guard !Task.isCancelled, let self else { return }
+            let changed = found.filter { known[$0.key] != $0.value }
+            guard !changed.isEmpty else { return }
+            for (path, info) in changed { self.fileInfo[path] = info }
+            try? await self.db?.saveFileInfo(changed)
+            self.applyResultOrder()          // the sort may depend on these dates
+        }
+    }
+
     // MARK: bounces
 
     func hasBounce(_ path: String) -> Bool { !(bounces[path] ?? []).isEmpty }
@@ -425,7 +485,7 @@ final class LibraryModel {
                                          restrictsTracks: !q.nameTerms.isEmpty || !q.kinds.isEmpty || q.hidden != .include)
             self.refreshProjectTexts()
             let wholeProjects = pq.restrictsTracks ? [] : self.entries.filter { path, entry in
-                ProjectSearch.matches(pq, entry: entry, projectName: self.foldedProjectName(path), pluginText: self.pluginText(path, entry))
+                ProjectSearch.matches(pq, entry: entry, projectName: self.foldedProjectName(path), pluginText: self.pluginText(path, entry), tagText: self.tagText(path))
             }.map(\.key)
             self.nameSortedResults = SearchResults.combine(hits: result.hits, projects: wholeProjects, name: Self.projectName)
                 .filter { self.bounceFilter.allows(hasBounce: self.hasBounce($0.path)) }
@@ -462,7 +522,7 @@ final class LibraryModel {
 
     /// `paths` (in natural name order) in the chosen sort order.
     private func ordered(_ paths: [String]) -> [String] {
-        ProjectSorting.sorted(paths, by: sortOrder, date: { entries[$0]?.projectDataMTime })
+        ProjectSorting.sorted(paths, by: sortOrder, value: sortValue)
     }
 
     /// The folder's projects, narrowed by the active filters and search text, in the chosen sort order (natural name order by default).
