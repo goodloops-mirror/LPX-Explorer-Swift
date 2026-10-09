@@ -6,6 +6,9 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+### Fixed
+- Projects converted from older Logic versions (and a few tracks in others) show the names of all their tracks: object records whose id is above 255 are now read, as a last fallback and only for objects nothing milder could find. Checked on all example projects: besides the converted "Spacey", only one previously blank hidden track in the two LSK projects changed (it now has its name). The library is re-read once.
+
 ## [0.7.0] - 2026-10-08
 
 ### Added

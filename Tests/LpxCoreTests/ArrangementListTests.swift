@@ -141,10 +141,10 @@ final class TrackObjectsTests: XCTestCase {
     private typealias F = ArrangementFixture
 
     /// 170 header bytes (key at 0 and 42) + registry-shaped record of class `cls`.
-    private func object(name: String, cls: UInt16, key: UInt32, stripID: UInt8, leading: [UInt8] = [0, 0]) -> [UInt8] {
+    private func object(name: String, cls: UInt16, key: UInt32, stripID: UInt8, leading: [UInt8] = [0, 0], idHigh: UInt8 = 0) -> [UInt8] {
         var head = [UInt8](repeating: 0x11, count: 170)
         head.replaceSubrange(0..<4, with: F.u32(key)); head.replaceSubrange(42..<46, with: F.u32(key))
-        let rec: [UInt8] = leading + [0, 0, UInt8(cls & 0xff), UInt8(cls >> 8), 0, 0, 0, 0, 0xAB, 0xCD, 0, 0, UInt8(name.utf8.count), 0]
+        let rec: [UInt8] = leading + [0, 0, UInt8(cls & 0xff), UInt8(cls >> 8), 0, idHigh, 0, 0, 0xAB, 0xCD, 0, 0, UInt8(name.utf8.count), 0]
         return head + rec + Array(name.utf8) + [stripID, 0, 0, 0, 0, 1, 0, 0]
     }
 
@@ -185,17 +185,26 @@ final class TrackObjectsTests: XCTestCase {
     func testLenientModeAcceptsRecordsPackedBehindText() {
         let raw = object(name: "soft piano", cls: 0x1199, key: 0x94, stripID: 3, leading: Array("of".utf8))
         XCTAssertTrue(TrackObjects.find(raw).isEmpty, "strict: the record must start with four zero bytes")
-        XCTAssertEqual(TrackObjects.find(raw, lenient: true).map(\.name), ["soft piano"])
-        XCTAssertEqual(TrackObjects.find(raw, lenient: true).first?.key, 0x94)
+        XCTAssertEqual(TrackObjects.find(raw, leniency: .packed).map(\.name), ["soft piano"])
+        XCTAssertEqual(TrackObjects.find(raw, leniency: .packed).first?.key, 0x94)
+    }
+
+    func testLenientModeAcceptsObjectIdsAbove255() {
+        // Converted projects number their objects beyond one byte: bytes 6-7 are a 16-bit id (here 0x0294), not "xx 00".
+        let raw = object(name: "zz AudioInst 01", cls: 0x10ac, key: 0x290, stripID: 1, idHigh: 0x02)
+        XCTAssertTrue(TrackObjects.find(raw).isEmpty, "strict: byte 7 must be zero")
+        XCTAssertTrue(TrackObjects.find(raw, leniency: .packed).isEmpty, "packed alone doesn't accept wide ids")
+        XCTAssertEqual(TrackObjects.find(raw, leniency: .wideIDs).map(\.name), ["zz AudioInst 01"])
+        XCTAssertEqual(TrackObjects.find(raw, leniency: .wideIDs).first?.key, 0x290)
     }
 
     func testLenientModeStillNeedsTheKeyAndTheRestOfTheShape() {
         var noKey = object(name: "x", cls: 0x1199, key: 0x94, stripID: 3, leading: Array("of".utf8))
         noKey.replaceSubrange(42..<46, with: F.u32(0x1))
-        XCTAssertTrue(TrackObjects.find(noKey, lenient: true).isEmpty)
+        XCTAssertTrue(TrackObjects.find(noKey, leniency: .packed).isEmpty)
         var badShape = object(name: "x", cls: 0x1199, key: 0x94, stripID: 3, leading: [1, 1])
         badShape.replaceSubrange(172..<174, with: [9, 9])          // bytes 2-3 of the record are not zero
-        XCTAssertTrue(TrackObjects.find(badShape, lenient: true).isEmpty)
+        XCTAssertTrue(TrackObjects.find(badShape, leniency: .packed).isEmpty)
     }
 
     func testCompleteAddsLenientMatchesOnlyForKeysTheStrictPassMissed() {
@@ -206,6 +215,19 @@ final class TrackObjectsTests: XCTestCase {
             return TrackObjects.complete(strict, needing: [0x170, 0x94], in: buf)
         }
         XCTAssertEqual(raw.map(\.name), ["DX", "soft piano"])
+    }
+
+    func testALooserMatchNeverReplacesAnAlreadyFoundKey() {
+        // Key 0x94 is found at the packed level; a (false) wide-id candidate for the same key appears earlier in the file.
+        let wide = object(name: "FALSE candidate", cls: 0x1199, key: 0x94, stripID: 9, idHigh: 0x02)
+        let packed = object(name: "right one", cls: 0x1199, key: 0x94, stripID: 3, leading: Array("of".utf8))
+        (wide + packed).withUnsafeBufferPointer { buf in
+            let result = TrackObjects.complete(TrackObjects.find(in: buf), needing: [0x94], in: buf)
+            XCTAssertEqual(result.map(\.name), ["right one"], "the wide-id pass is only for keys no milder pass found")
+        }
+        wide.withUnsafeBufferPointer { buf in
+            XCTAssertEqual(TrackObjects.complete([], needing: [0x94], in: buf).map(\.name), ["FALSE candidate"], "…but it is used when nothing else exists")
+        }
     }
 
     func testCompleteLeavesFilesAloneWhenEverythingWasFoundStrictly() {

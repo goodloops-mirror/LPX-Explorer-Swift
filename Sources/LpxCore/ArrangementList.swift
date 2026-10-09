@@ -123,9 +123,20 @@ public enum TrackObjects {
     /// Object records that carry a valid key (the same non-zero u32 stored 170 and 128 bytes before the record).
     /// Layout: `4 zeros · class u16 · bytes 6-9 (x000) · 2 control bytes · 2 zeros · length · printable name · trailer`.
     ///
-    /// `lenient` accepts records whose first two bytes are not zero (files written by Logic Pro X 10.5 and earlier pack the
-    /// record right behind the previous text); it is only meant as a fallback, see `complete`.
-    public static func find(in raw: UnsafeBufferPointer<UInt8>, lenient: Bool = false) -> [ObjectRecord] {
+    /// How strictly a record's shape is checked. Each step accepts everything the previous one does; the looser ones find
+    /// more records but also more false ones, so they are only used as fallbacks (see `complete`).
+    public enum Leniency: Int, Comparable, Sendable {
+        /// Four zero bytes in front, object id (bytes 6-7) below 256.
+        case strict
+        /// Also records whose first two bytes are not zero: files written by Logic Pro X 10.5 and earlier pack the record
+        /// right behind the previous text.
+        case packed
+        /// Also object ids above 255 (bytes 6-7 as a 16-bit number): projects converted from older Logic versions.
+        case wideIDs
+        public static func < (a: Leniency, b: Leniency) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    public static func find(in raw: UnsafeBufferPointer<UInt8>, leniency: Leniency = .strict) -> [ObjectRecord] {
         var out: [ObjectRecord] = []
         let n = raw.count
         guard n >= 186 else { return out }
@@ -144,8 +155,8 @@ public enum TrackObjects {
             let i = next - 5
             scanFrom = next + 1
             guard i + 16 <= n else { break }
-            guard (lenient ? raw[i + 2] | raw[i + 3] : raw[i] | raw[i + 1] | raw[i + 2] | raw[i + 3]) == 0,
-                  raw[i + 7] == 0, raw[i + 8] == 0, raw[i + 9] == 0, raw[i + 12] | raw[i + 13] == 0, raw[i + 15] == 0 else { continue }
+            guard (leniency >= .packed ? raw[i + 2] | raw[i + 3] : raw[i] | raw[i + 1] | raw[i + 2] | raw[i + 3]) == 0,
+                  leniency >= .wideIDs || raw[i + 7] == 0, raw[i + 8] == 0, raw[i + 9] == 0, raw[i + 12] | raw[i + 13] == 0, raw[i + 15] == 0 else { continue }
             let length = Int(raw[i + 14])
             guard length > 0, length <= 200, i + 16 + length <= n else { continue }
             let nameBytes = UnsafeBufferPointer(rebasing: raw[(i + 16) ..< (i + 16 + length)])
@@ -163,15 +174,20 @@ public enum TrackObjects {
         return out
     }
 
-    public static func find(_ raw: [UInt8], lenient: Bool = false) -> [ObjectRecord] { raw.withUnsafeBufferPointer { find(in: $0, lenient: lenient) } }
+    public static func find(_ raw: [UInt8], leniency: Leniency = .strict) -> [ObjectRecord] { raw.withUnsafeBufferPointer { find(in: $0, leniency: leniency) } }
 
-    /// `strict` plus — only for object keys in `needed` that strict found nowhere — the lenient matches. Files whose objects
-    /// are all found strictly never run the lenient pass, and a lenient match can never shadow a strict one.
+    /// `strict` plus, step by step, the looser matches — each only for object keys in `needed` that no stricter step
+    /// found. Files whose objects are all found strictly never run a looser pass, and a looser match can never shadow a
+    /// stricter one.
     public static func complete(_ strict: [ObjectRecord], needing needed: Set<UInt32>, in raw: UnsafeBufferPointer<UInt8>) -> [ObjectRecord] {
-        let have = Set(strict.map(\.key))
-        guard !needed.subtracting(have).isEmpty else { return strict }
-        let missing = needed.subtracting(have)
-        return strict + find(in: raw, lenient: true).filter { missing.contains($0.key) }
+        var out = strict
+        var missing = needed.subtracting(Set(strict.map(\.key)))
+        for level in [Leniency.packed, .wideIDs] where !missing.isEmpty {
+            let extra = find(in: raw, leniency: level).filter { missing.contains($0.key) }
+            out += extra
+            missing.subtract(extra.map(\.key))
+        }
+        return out
     }
 
     /// The strip number sits at offset 0 or 1 of the trailer (the alignment varies), as a u16 below 512. Both readings are
