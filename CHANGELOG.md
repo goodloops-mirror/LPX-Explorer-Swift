@@ -6,6 +6,8 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-09
+
 ### Changed
 - The project list has columns: **Date Modified** and **Date Created** (Finder's dates, refreshed in the background after every scan), and optionally **Date Saved** (when Logic last saved the project), **Size** and **Tags** (all Finder tags by name). Click a column title to sort by it, right-click the title bar to choose the columns (like Finder); the Sort menu offers the same fields. Tags are searchable in the main search box. Columns have fixed widths. This replaces the single date I added earlier. The library is re-read once to record sizes and dates.
 
