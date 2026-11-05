@@ -6,6 +6,8 @@ Earlier versions (v0.0.x) belong to the retired Tauri app in `legacy-tauri/`.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-05
+
 ### Added
 - Browse the library's folders like Finder: a switch above the project list chooses **All Projects** (the flat list), **Folders as List** (folders open and close in place, ←/→ or double-click, with the same date/size/tag columns) or **Folders as Columns** (choosing a folder opens its contents in a new column). Choosing a project shows it in the inspector; a project picked elsewhere (search results) is revealed in the folder views. Only folders and Logic projects are listed; nothing is ever written.
 
