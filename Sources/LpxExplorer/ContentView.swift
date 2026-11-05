@@ -340,12 +340,29 @@ struct MiddlePane: View {
         // results view, and a bar attached to the swapped view was rebuilt with it, which dropped the text field's focus.
         VStack(spacing: 0) {
             SearchFilterBar()
-            ProjectColumnHeader()
+            if model.isSearching || model.browser.mode != .columns { ProjectColumnHeader() }
             Group {
-                if model.isSearching { SearchResultsView() } else { ProjectListView() }
+                if model.isSearching {
+                    SearchResultsView()
+                } else if let root = model.selectedFolder, model.browser.mode == .tree {
+                    FolderTreeView(root: root).id(root)
+                } else if let root = model.selectedFolder, model.browser.mode == .columns {
+                    FolderColumnsView(root: root).id(root)
+                } else {
+                    ProjectListView()
+                }
             }
         }
+        .onChange(of: model.isScanning) { _, scanning in if !scanning { model.browser.reload() } }
+        .onChange(of: model.selectedFolder) { _, _ in model.browser.resetSelection() }
         .toolbar {
+            ToolbarItem {
+                Picker("View", selection: Binding(get: { model.browser.mode }, set: { model.browser.mode = $0 })) {
+                    ForEach(BrowseMode.allCases) { Label($0.title, systemImage: $0.icon).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .help("Show the projects as one list, or browse the folders as a list or in columns")
+            }
             ToolbarItem {
                 Menu {
                     Picker("Sort by", selection: Binding(get: { model.sortOrder.field }, set: { model.sortOrder = .initial(for: $0) })) {

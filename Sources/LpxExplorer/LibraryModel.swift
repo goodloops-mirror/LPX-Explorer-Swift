@@ -40,6 +40,8 @@ final class LibraryModel {
 
     var selectedFolder: String? { didSet { if oldValue != selectedFolder { similarityFilter = nil } } }
     var selectedProject: String?
+    /// The folder browser (tree and column views) of the middle pane.
+    let browser = FolderBrowser()
     /// Bumped by "Reset Column Widths": rebuilds the split view so the default proportions (15 / 50 / 35 %) apply again.
     private(set) var layoutResets = 0
 
@@ -353,7 +355,7 @@ final class LibraryModel {
     func tags(_ path: String) -> [String] { fileInfo[path]?.tags ?? [] }
 
     /// The number a project is sorted by for the current field (dates in seconds, size in bytes).
-    private func sortValue(_ path: String) -> Int64? {
+    func sortValue(_ path: String) -> Int64? {
         switch sortOrder.field {
         case .name: nil
         case .dateModified: modifiedDate(path)
